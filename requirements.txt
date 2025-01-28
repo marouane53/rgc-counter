@@ -1,6 +1,12 @@
-numpy
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.1.2+cu118
+torchvision==0.16.2+cu118
+torchaudio==2.1.2+cu118
+numpy<2.0
+
+cellpose[gpu]
 opencv-python
 matplotlib
-tifffile
-cellpose[gpu]  # or just 'cellpose' if GPU is not an option, but you have an RTX 4090
 scipy
+tifffile
+pyyaml

@@ -1,3 +1,43 @@
+# Generated outputs and data
+Outputs/
+input/*
+!input/.gitkeep
+pip_install_log.txt
+
+# Python cache and virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build and distribution
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Test coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# Logs
+*.log
+
 # Ignore contents of data and output folders
 data/*
 output/*
@@ -12,6 +52,10 @@ __pycache__/
 *$py.class
 *.so
 .Python
+.venv/
+venv/
+ENV/
+env/
 build/
 develop-eggs/
 dist/
@@ -27,13 +71,12 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-.env
-.venv
-env/
-venv/
-ENV/
-.env.bak/
-.venv.bak/
+
+# Project specific
+Outputs/
+input/*
+!input/.gitkeep
+pip_install_log.txt
 
 # IDE-related files
 .vscode/

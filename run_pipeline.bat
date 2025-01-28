@@ -2,31 +2,37 @@
 
 REM --------------------------------------------------
 REM  run_pipeline.bat
-REM  Windows batch script using PowerShell Tee-Object
+REM  Windows batch script for Cell Counting Project
 REM --------------------------------------------------
 
 REM Check if .venv directory exists
 IF NOT EXIST ".venv" (
     echo [ERROR] .venv folder not found in the current directory.
     echo Please create a virtual environment named .venv first.
+    pause
     goto end
 )
 
 REM Activate the virtual environment
 call .venv\Scripts\activate
 
-REM Use PowerShell to install/upgrade packages and tee output
 echo Installing or updating Python requirements (please wait)...
 
-powershell -NoProfile -Command "pip install --upgrade pip | Tee-Object -FilePath pip_install_log.txt"
+REM Quietly upgrade pip (hide all output, log errors if they occur)
+pip install --upgrade pip --quiet > pip_install_log.txt 2>&1
 IF ERRORLEVEL 1 (
-    echo [ERROR] Failed to upgrade pip. Check pip_install_log.txt for details.
+    echo [ERROR] Failed to upgrade pip. 
+    echo Check pip_install_log.txt for details.
+    pause
     goto end
 )
 
-powershell -NoProfile -Command "pip install -r requirements.txt | Tee-Object -FilePath pip_install_log.txt"
+REM Quietly install dependencies
+pip install -r requirements.txt --quiet >> pip_install_log.txt 2>&1
 IF ERRORLEVEL 1 (
-    echo [ERROR] Failed to install dependencies. Check pip_install_log.txt for details.
+    echo [ERROR] Failed to install dependencies.
+    echo Check pip_install_log.txt for details.
+    pause
     goto end
 )
 
@@ -37,11 +43,26 @@ echo --------------------------------------------------
 echo Automated RGC Counting - Interactive Prompt
 echo --------------------------------------------------
 
-REM Prompt for input directory
-set /p input_dir="Enter the folder path that contains the .tif images: "
+REM Prompt for input directory (optional)
+echo Press Enter to use default "input" folder, or specify a different path:
+set /p input_dir="Enter the folder path that contains the .tif images (optional): "
 
-REM Prompt for output directory
-set /p output_dir="Enter the folder path where you want the results saved: "
+REM Use default if empty
+if "%input_dir%"=="" (
+    set input_dir=input
+    echo Using default input folder: input
+)
+
+REM Prompt for output directory (optional)
+echo.
+echo Press Enter to use default "Outputs" folder, or specify a different path:
+set /p output_dir="Enter the folder path where you want the results saved (optional): "
+
+REM Use default if empty
+if "%output_dir%"=="" (
+    set output_dir=Outputs
+    echo Using default output folder: Outputs
+)
 
 REM Prompt for approximate diameter
 echo.
@@ -84,24 +105,26 @@ if /i "%blur_choice%"=="y" (
 echo.
 echo --------------------------------------------------
 echo Now running the main pipeline...
-echo (Logging console output to run_pipeline_log.txt)
 echo --------------------------------------------------
 
-REM Use PowerShell so we can see live output in the console
-REM and also save it to run_pipeline_log.txt
-powershell -NoProfile -Command ^
-    "python -u main.py ^
-        --input_dir '%input_dir%' ^
-        --output_dir '%output_dir%' ^
-        %diameter_arg% ^
-        %debug_arg% ^
-        %gpu_arg% ^
-        %blur_arg% ^
-    | Tee-Object -FilePath run_pipeline_log.txt"
+REM Run main.py with user-supplied args
+python main.py ^
+  --input_dir "%input_dir%" ^
+  --output_dir "%output_dir%" ^
+  %diameter_arg% ^
+  %debug_arg% ^
+  %gpu_arg% ^
+  %blur_arg%
+
+REM If something failed, we keep the window open.
+IF ERRORLEVEL 1 (
+    echo [ERROR] The Python script exited with an error.
+    pause
+    goto end
+)
 
 echo.
 echo [INFO] All done! Check your output folder for results.
-echo [INFO] See run_pipeline_log.txt for the full console log.
 
 :end
 pause
