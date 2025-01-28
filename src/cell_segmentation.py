@@ -2,13 +2,14 @@
 
 import numpy as np
 from cellpose import models
+from src.config import CELL_DIAMETER, MODEL_TYPE, USE_GPU
 
 def segment_cells_cellpose(
     image,
-    diameter=None,
-    model_type='cyto',
+    diameter=CELL_DIAMETER,
+    model_type=MODEL_TYPE,
     channels=[0, 0],
-    use_gpu=True
+    use_gpu=USE_GPU
 ):
     """
     Use Cellpose to segment cells from an image.

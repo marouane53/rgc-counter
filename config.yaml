@@ -1,1 +1,16 @@
 microns_per_pixel: 0.227
+
+# Cell detection parameters
+cell_detection:
+  diameter: null  # Set to null for auto-estimation
+  model_type: 'cyto'  # Options: 'cyto' or 'nuclei'
+  use_gpu: true
+
+# Analysis settings
+analysis:
+  min_cell_size: 10  # minimum cell size in pixels (default from original main.py)
+  max_cell_size: 10000  # maximum cell size in pixels (default from original main.py)
+
+# Visualization options
+visualization:
+  overlay_alpha: 0.5  # transparency for debug overlays (0-1)

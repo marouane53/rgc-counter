@@ -2,8 +2,9 @@
 
 import numpy as np
 import cv2
+from src.config import MIN_CELL_SIZE, MAX_CELL_SIZE
 
-def filter_masks_by_size(masks, min_size=5, max_size=1e6):
+def filter_masks_by_size(masks, min_size=MIN_CELL_SIZE, max_size=MAX_CELL_SIZE):
     """
     Remove segmented objects that are too small or too large.
     masks is a 2D integer array where each object has an integer ID > 0.
@@ -21,7 +22,7 @@ def filter_masks_by_size(masks, min_size=5, max_size=1e6):
             object_id_counter += 1
     return filtered
 
-def postprocess_masks(masks, min_size=5, max_size=1e6):
+def postprocess_masks(masks, min_size=MIN_CELL_SIZE, max_size=MAX_CELL_SIZE):
     """
     A convenience function that filters masks by size
     or can do morphological ops if needed.

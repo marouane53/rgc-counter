@@ -13,6 +13,14 @@ from src.postprocessing import (
 from src.analysis import compute_cell_count_and_density
 from src.visualize import create_debug_overlay, save_debug_image
 from src.utils import save_results_to_csv
+from src.config import (
+    CELL_DIAMETER,
+    MODEL_TYPE,
+    USE_GPU,
+    MIN_CELL_SIZE,
+    MAX_CELL_SIZE,
+    OVERLAY_ALPHA
+)
 
 def main():
     parser = argparse.ArgumentParser(description="Automated RGC Counting")
@@ -21,17 +29,19 @@ def main():
     parser.add_argument("--output_dir", type=str, default="Outputs",
                         help="Folder for output CSV and debug images")
     parser.add_argument("--diameter", type=float, default=None,
-                        help="Approx. diameter of cells in pixels (or None to auto-estimate).")
-    parser.add_argument("--model_type", type=str, default="cyto",
-                        help="Cellpose model type: 'cyto', 'nuclei', or a custom model path.")
-    parser.add_argument("--min_size", type=int, default=10,
-                        help="Minimum mask area in pixels to keep.")
-    parser.add_argument("--max_size", type=int, default=10000,
-                        help="Maximum mask area in pixels to keep.")
+                        help="Override config.yaml cell diameter (in pixels).")
+    parser.add_argument("--model_type", type=str, default=None,
+                        help="Override config.yaml model type: 'cyto', 'nuclei', or a custom model path.")
+    parser.add_argument("--min_size", type=int, default=None,
+                        help="Override config.yaml minimum mask area in pixels.")
+    parser.add_argument("--max_size", type=int, default=None,
+                        help="Override config.yaml maximum mask area in pixels.")
     parser.add_argument("--save_debug", action="store_true",
                         help="If set, generate and save debug overlays.")
     parser.add_argument("--use_gpu", action="store_true",
-                        help="Use GPU for Cellpose if available.")
+                        help="Override config.yaml GPU setting.")
+    parser.add_argument("--no_gpu", action="store_true",
+                        help="Override config.yaml GPU setting to False.")
     parser.add_argument("--apply_blur", action="store_true",
                         help="Apply Gaussian blur to the image before segmentation.")
 
@@ -41,15 +51,30 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
     
+    # Merge command line args with config.yaml settings
+    # Command line args take precedence when specified
+    diameter = args.diameter if args.diameter is not None else CELL_DIAMETER
+    model_type = args.model_type if args.model_type is not None else MODEL_TYPE
+    min_size = args.min_size if args.min_size is not None else MIN_CELL_SIZE
+    max_size = args.max_size if args.max_size is not None else MAX_CELL_SIZE
+    
+    # Special handling for GPU flag to allow explicit disable
+    if args.no_gpu:
+        use_gpu = False
+    elif args.use_gpu:
+        use_gpu = True
+    else:
+        use_gpu = USE_GPU
+    
     # ---- GPU Feedback Logic ----
-    if args.use_gpu:
+    if use_gpu:
         if torch.cuda.is_available():
-            print("[INFO] GPU is requested and CUDA is available. Cellpose will run on GPU.")
+            print("[INFO] GPU is enabled and CUDA is available. Cellpose will run on GPU.")
         else:
-            print("[WARNING] GPU is requested, but CUDA is NOT available.")
+            print("[WARNING] GPU is enabled, but CUDA is NOT available.")
             print("[WARNING] Falling back to CPU for Cellpose segmentation.")
     else:
-        print("[INFO] Using CPU for Cellpose (GPU not requested).")
+        print("[INFO] Using CPU for Cellpose (GPU not enabled).")
     # ----------------------------
 
     # Walk through all subdirectories
@@ -89,17 +114,17 @@ def main():
             # Segment cells with Cellpose
             masks, flows, styles, diams = segment_cells_cellpose(
                 gray_img,
-                diameter=args.diameter,
-                model_type=args.model_type,
+                diameter=diameter,
+                model_type=model_type,
                 channels=[0, 0],
-                use_gpu=args.use_gpu
+                use_gpu=use_gpu
             )
             
             # Postprocessing
             masks_filtered = postprocess_masks(
                 masks, 
-                min_size=args.min_size, 
-                max_size=args.max_size
+                min_size=min_size, 
+                max_size=max_size
             )
             
             # Analysis
@@ -107,7 +132,7 @@ def main():
             
             # (Optional) Debug overlay
             if args.save_debug:
-                debug_image = create_debug_overlay(gray_img, masks_filtered, alpha=0.5)
+                debug_image = create_debug_overlay(gray_img, masks_filtered, alpha=OVERLAY_ALPHA)
                 debug_filename = os.path.basename(filepath).replace('.tif','_debug.png')
                 save_debug_image(debug_image, os.path.join(current_output_dir, debug_filename))
             

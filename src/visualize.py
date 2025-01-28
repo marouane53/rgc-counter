@@ -3,8 +3,9 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+from src.config import OVERLAY_ALPHA
 
-def create_debug_overlay(image, masks, alpha=0.5):
+def create_debug_overlay(image, masks, alpha=OVERLAY_ALPHA):
     """
     Draws colored labels on top of the grayscale image for verification.
     Returns an RGB image.
