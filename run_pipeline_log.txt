@@ -1,0 +1,22 @@
+D:\Code\umontreal.ca\cell_counting_project\.venv\Lib\site-packages\cellpose\resnet_torch.py:275: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  state_dict = torch.load(filename, map_location=torch.device("cpu"))
+[WARNING] GPU is requested, but CUDA is NOT available.
+[WARNING] Falling back to CPU for Cellpose segmentation.
+Processed Snap-489.tif | Cells: 393, Density: 258.71 cells/mm^2
+Processed Snap-490.tif | Cells: 302, Density: 198.80 cells/mm^2
+Processed Snap-491.tif | Cells: 617, Density: 406.16 cells/mm^2
+Processed Snap-492.tif | Cells: 1142, Density: 751.76 cells/mm^2
+Processed Snap-494.tif | Cells: 658, Density: 433.15 cells/mm^2
+Processed Snap-495.tif | Cells: 1239, Density: 815.61 cells/mm^2
+Traceback (most recent call last):
+  File "D:\Code\umontreal.ca\cell_counting_project\main.py", line 111, in <module>
+    if __name__ == "__main__":
+        ^^^^^^
+  File "D:\Code\umontreal.ca\cell_counting_project\main.py", line 92, in main
+    debug_filename = os.path.basename(filepath).replace('.tif','_debug.png')
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Code\umontreal.ca\cell_counting_project\src\visualize.py", line 48, in save_debug_image
+    cv2.imwrite(output_path, debug_image[..., ::-1])  # cv2 uses BGR by default, so flip to save in correct color
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
+^C

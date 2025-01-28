@@ -1,0 +1,31 @@
+# Ignore contents of data and output folders
+data/*
+output/*
+
+# Don't ignore the folders themselves
+!data/.gitkeep
+!output/.gitkeep
+
+# Python-related files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv
+env/
+venv/
+ENV/
+.env.bak/
+.venv.bak/
+
+# IDE-related files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS-related files
+.DS_Store
+Thumbs.db 

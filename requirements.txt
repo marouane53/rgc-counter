@@ -1,0 +1,6 @@
+numpy
+opencv-python
+matplotlib
+tifffile
+cellpose[gpu]  # or just 'cellpose' if GPU is not an option, but you have an RTX 4090
+scipy
