@@ -8,7 +8,8 @@ from src import utils
 from src.cell_segmentation import segment_cells_cellpose
 from src.postprocessing import (
     postprocess_masks,
-    apply_gaussian_blur
+    apply_gaussian_blur,
+    apply_clahe
 )
 from src.analysis import compute_cell_count_and_density
 from src.visualize import create_debug_overlay, save_debug_image
@@ -39,11 +40,13 @@ def main():
     parser.add_argument("--save_debug", action="store_true",
                         help="If set, generate and save debug overlays.")
     parser.add_argument("--use_gpu", action="store_true",
-                        help="Override config.yaml GPU setting.")
+                        help="Override config.yaml GPU setting to True.")
     parser.add_argument("--no_gpu", action="store_true",
                         help="Override config.yaml GPU setting to False.")
     parser.add_argument("--apply_blur", action="store_true",
                         help="Apply Gaussian blur to the image before segmentation.")
+    parser.add_argument("--apply_clahe", action="store_true",
+                        help="Apply CLAHE to enhance contrast before segmentation.")
 
     args = parser.parse_args()
     
@@ -52,7 +55,6 @@ def main():
         os.makedirs(args.output_dir)
     
     # Merge command line args with config.yaml settings
-    # Command line args take precedence when specified
     diameter = args.diameter if args.diameter is not None else CELL_DIAMETER
     model_type = args.model_type if args.model_type is not None else MODEL_TYPE
     min_size = args.min_size if args.min_size is not None else MIN_CELL_SIZE
@@ -110,6 +112,11 @@ def main():
             # (Optional) Apply Gaussian blur if requested
             if args.apply_blur:
                 gray_img = apply_gaussian_blur(gray_img, ksize=3)
+
+            # (Optional) Apply CLAHE if requested
+            if args.apply_clahe:
+                # Using default clipLimit=2.0 and tileGridSize=(8,8)
+                gray_img = apply_clahe(gray_img, clip_limit=2.0, tile_grid_size=(8,8))
             
             # Segment cells with Cellpose
             masks, flows, styles, diams = segment_cells_cellpose(

@@ -95,11 +95,20 @@ if /i "%gpu_choice%"=="y" (
 
 REM Prompt for applying Gaussian blur
 echo.
-set /p blur_choice="Apply Gaussian blur for blurry edges? (y/n): "
+set /p blur_choice="Apply Gaussian blur for smoothing edges? (y/n): "
 if /i "%blur_choice%"=="y" (
     set blur_arg=--apply_blur
 ) else (
     set blur_arg=
+)
+
+REM Prompt for applying CLAHE
+echo.
+set /p clahe_choice="Apply CLAHE for contrast enhancement? (y/n): "
+if /i "%clahe_choice%"=="y" (
+    set clahe_arg=--apply_clahe
+) else (
+    set clahe_arg=
 )
 
 echo.
@@ -114,7 +123,8 @@ python main.py ^
   %diameter_arg% ^
   %debug_arg% ^
   %gpu_arg% ^
-  %blur_arg%
+  %blur_arg% ^
+  %clahe_arg%
 
 REM If something failed, we keep the window open.
 IF ERRORLEVEL 1 (

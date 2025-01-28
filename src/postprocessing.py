@@ -39,7 +39,6 @@ def apply_gaussian_blur(image, ksize=3):
     """
     # Ensure image is uint8 or float for OpenCV
     if image.dtype != np.uint8:
-        # scale down if it's large
         img_norm = image.astype(np.float32)
         img_norm = img_norm / img_norm.max() * 255.0
         img_uint8 = img_norm.astype(np.uint8)
@@ -48,3 +47,24 @@ def apply_gaussian_blur(image, ksize=3):
 
     blurred = cv2.GaussianBlur(img_uint8, (ksize, ksize), 0)
     return blurred
+
+def apply_clahe(image, clip_limit=2.0, tile_grid_size=(8,8)):
+    """
+    Applies Contrast Limited Adaptive Histogram Equalization (CLAHE) to enhance contrast.
+
+    :param image: 2D numpy array (grayscale)
+    :param clip_limit: Threshold for contrast limiting
+    :param tile_grid_size: Size of grid for histogram equalization
+    :return: Contrast-enhanced image (uint8)
+    """
+    # Ensure the image is uint8
+    if image.dtype != np.uint8:
+        img_norm = image.astype(np.float32)
+        img_norm = img_norm / img_norm.max() * 255.0
+        image_uint8 = img_norm.astype(np.uint8)
+    else:
+        image_uint8 = image
+    
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
+    enhanced = clahe.apply(image_uint8)
+    return enhanced
