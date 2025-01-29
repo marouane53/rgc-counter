@@ -13,7 +13,7 @@ IF NOT EXIST ".venv" (
     goto end
 )
 
-REM Activate the virtual environment
+REM Activate the virtual environment (ensure this is the correct path)
 call .venv\Scripts\activate
 
 echo Installing or updating Python requirements (please wait)...
@@ -53,18 +53,15 @@ if "%input_dir%"=="" (
     echo Using default input folder: input
 )
 
-REM Prompt for output directory (optional)
 echo.
 echo Press Enter to use default "Outputs" folder, or specify a different path:
 set /p output_dir="Enter the folder path where you want the results saved (optional): "
 
-REM Use default if empty
 if "%output_dir%"=="" (
     set output_dir=Outputs
     echo Using default output folder: Outputs
 )
 
-REM Prompt for approximate diameter
 echo.
 echo (If you don't know the diameter in pixels, press Enter to let Cellpose auto-estimate.)
 set /p diameter_input="Approximate RGC diameter (in pixels), or leave blank: "
@@ -75,48 +72,66 @@ if "%diameter_input%"=="" (
     set diameter_arg=--diameter %diameter_input%
 )
 
-REM Prompt for debug overlay
 echo.
 set /p debug_choice="Do you want to save debug overlays? (y/n): "
-if /i "%debug_choice%"=="y" (
+if /I "%debug_choice%"=="y" (
     set debug_arg=--save_debug
 ) else (
     set debug_arg=
 )
 
-REM Prompt for GPU usage
 echo.
 set /p gpu_choice="Do you want to use GPU for Cellpose? (y/n): "
-if /i "%gpu_choice%"=="y" (
+if /I "%gpu_choice%"=="y" (
     set gpu_arg=--use_gpu
 ) else (
     set gpu_arg=
 )
 
-REM Prompt for applying CLAHE
 echo.
 set /p clahe_choice="Apply CLAHE for contrast enhancement? (y/n): "
-if /i "%clahe_choice%"=="y" (
+if /I "%clahe_choice%"=="y" (
     set clahe_arg=--apply_clahe
 ) else (
     set clahe_arg=
 )
 
-REM Prompt for focus-based masking
 echo.
-set /p focus_choice="Use focus-based masking approach? (y/n): "
-if /i "%focus_choice%"=="y" (
-    set focus_arg=--focus_mask
-) else (
-    set focus_arg=--no_focus_mask
-)
+echo --------------------------------------------------
+echo Choose focus mode for each image:
+echo (1) No focus bounding (analyze entire image)
+echo (2) Manual bounding-box in Napari
+echo (3) Automatic tile-based focus detection (improved)
+echo --------------------------------------------------
+set /p focus_mode_choice="Enter 1, 2, or 3: "
 
+if "%focus_mode_choice%"=="1" goto focus_none
+if "%focus_mode_choice%"=="2" goto focus_bbox
+if "%focus_mode_choice%"=="3" goto focus_auto
+goto focus_invalid
+
+:focus_none
+set "focus_mode_arg=--focus_none"
+goto focus_done
+
+:focus_bbox
+set "focus_mode_arg=--focus_bbox"
+goto focus_done
+
+:focus_auto
+set "focus_mode_arg=--focus_auto"
+goto focus_done
+
+:focus_invalid
+echo Invalid choice. Defaulting to (1) No focus bounding.
+set "focus_mode_arg=--focus_none"
+
+:focus_done
 echo.
 echo --------------------------------------------------
 echo Now running the main pipeline...
 echo --------------------------------------------------
 
-REM Run main.py with user-supplied args
 python main.py ^
   --input_dir "%input_dir%" ^
   --output_dir "%output_dir%" ^
@@ -124,17 +139,10 @@ python main.py ^
   %debug_arg% ^
   %gpu_arg% ^
   %clahe_arg% ^
-  %focus_arg%
+  %focus_mode_arg%
 
-REM If something failed, we keep the window open.
-IF ERRORLEVEL 1 (
-    echo [ERROR] The Python script exited with an error.
-    pause
-    goto end
-)
-
-echo.
-echo [INFO] All done! Check your output folder for results.
+echo Return code: %ERRORLEVEL%
+pause
 
 :end
 pause

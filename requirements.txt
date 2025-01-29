@@ -10,3 +10,7 @@ matplotlib
 scipy
 tifffile
 pyyaml
+
+
+napari
+pyqt5  # or PySide2, depending on your environment
