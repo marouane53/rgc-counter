@@ -1,22 +1,130 @@
-D:\Code\umontreal.ca\cell_counting_project\.venv\Lib\site-packages\cellpose\resnet_torch.py:275: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
-  state_dict = torch.load(filename, map_location=torch.device("cpu"))
-[WARNING] GPU is requested, but CUDA is NOT available.
-[WARNING] Falling back to CPU for Cellpose segmentation.
-Processed Snap-489.tif | Cells: 393, Density: 258.71 cells/mm^2
-Processed Snap-490.tif | Cells: 302, Density: 198.80 cells/mm^2
-Processed Snap-491.tif | Cells: 617, Density: 406.16 cells/mm^2
-Processed Snap-492.tif | Cells: 1142, Density: 751.76 cells/mm^2
-Processed Snap-494.tif | Cells: 658, Density: 433.15 cells/mm^2
-Processed Snap-495.tif | Cells: 1239, Density: 815.61 cells/mm^2
-Traceback (most recent call last):
-  File "D:\Code\umontreal.ca\cell_counting_project\main.py", line 111, in <module>
-    if __name__ == "__main__":
-        ^^^^^^
-  File "D:\Code\umontreal.ca\cell_counting_project\main.py", line 92, in main
-    debug_filename = os.path.basename(filepath).replace('.tif','_debug.png')
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "D:\Code\umontreal.ca\cell_counting_project\src\visualize.py", line 48, in save_debug_image
-    cv2.imwrite(output_path, debug_image[..., ::-1])  # cv2 uses BGR by default, so flip to save in correct color
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-KeyboardInterrupt
-^C
+@echo off
+
+REM --------------------------------------------------
+REM  run_pipeline.bat
+REM  Windows batch script for Cell Counting Project
+REM --------------------------------------------------
+
+REM Check if .venv directory exists
+IF NOT EXIST ".venv" (
+    echo [ERROR] .venv folder not found in the current directory.
+    echo Please create a virtual environment named .venv first.
+    pause
+    goto end
+)
+
+REM Activate the virtual environment
+call .venv\Scripts\activate
+
+echo Installing or updating Python requirements (please wait)...
+
+REM Quietly upgrade pip (hide all output, log errors if they occur)
+pip install --upgrade pip --quiet > pip_install_log.txt 2>&1
+IF ERRORLEVEL 1 (
+    echo [ERROR] Failed to upgrade pip. 
+    echo Check pip_install_log.txt for details.
+    pause
+    goto end
+)
+
+REM Quietly install dependencies
+pip install -r requirements.txt --quiet >> pip_install_log.txt 2>&1
+IF ERRORLEVEL 1 (
+    echo [ERROR] Failed to install dependencies.
+    echo Check pip_install_log.txt for details.
+    pause
+    goto end
+)
+
+echo Requirements installed successfully.
+
+echo.
+echo --------------------------------------------------
+echo Automated RGC Counting - Interactive Prompt
+echo --------------------------------------------------
+
+REM Prompt for input directory (optional)
+echo Press Enter to use default "input" folder, or specify a different path:
+set /p input_dir="Enter the folder path that contains the .tif images (optional): "
+
+REM Use default if empty
+if "%input_dir%"=="" (
+    set input_dir=input
+    echo Using default input folder: input
+)
+
+REM Prompt for output directory (optional)
+echo.
+echo Press Enter to use default "Outputs" folder, or specify a different path:
+set /p output_dir="Enter the folder path where you want the results saved (optional): "
+
+REM Use default if empty
+if "%output_dir%"=="" (
+    set output_dir=Outputs
+    echo Using default output folder: Outputs
+)
+
+REM Prompt for approximate diameter
+echo.
+echo (If you don't know the diameter in pixels, press Enter to let Cellpose auto-estimate.)
+set /p diameter_input="Approximate RGC diameter (in pixels), or leave blank: "
+
+if "%diameter_input%"=="" (
+    set diameter_arg=
+) else (
+    set diameter_arg=--diameter %diameter_input%
+)
+
+REM Prompt for debug overlay
+echo.
+set /p debug_choice="Do you want to save debug overlays? (y/n): "
+if /i "%debug_choice%"=="y" (
+    set debug_arg=--save_debug
+) else (
+    set debug_arg=
+)
+
+REM Prompt for GPU usage
+echo.
+set /p gpu_choice="Do you want to use GPU for Cellpose? (y/n): "
+if /i "%gpu_choice%"=="y" (
+    set gpu_arg=--use_gpu
+) else (
+    set gpu_arg=
+)
+
+REM Prompt for applying CLAHE
+echo.
+set /p clahe_choice="Apply CLAHE for contrast enhancement? (y/n): "
+if /i "%clahe_choice%"=="y" (
+    set clahe_arg=--apply_clahe
+) else (
+    set clahe_arg=
+)
+
+echo.
+echo --------------------------------------------------
+echo Now running the main pipeline...
+echo --------------------------------------------------
+
+REM Run main.py with user-supplied args
+python main.py ^
+  --input_dir "%input_dir%" ^
+  --output_dir "%output_dir%" ^
+  %diameter_arg% ^
+  %debug_arg% ^
+  %gpu_arg% ^
+  %clahe_arg%
+
+REM If something failed, we keep the window open.
+IF ERRORLEVEL 1 (
+    echo [ERROR] The Python script exited with an error.
+    pause
+    goto end
+)
+
+echo.
+echo [INFO] All done! Check your output folder for results.
+
+:end
+pause

@@ -8,11 +8,14 @@ from src import utils
 from src.cell_segmentation import segment_cells_cellpose
 from src.postprocessing import (
     postprocess_masks,
-    apply_gaussian_blur,
     apply_clahe
 )
 from src.analysis import compute_cell_count_and_density
-from src.visualize import create_debug_overlay, save_debug_image
+from src.visualize import (
+    create_debug_overlay,
+    save_debug_image,
+    apply_out_of_focus_overlay
+)
 from src.utils import save_results_to_csv
 from src.config import (
     CELL_DIAMETER,
@@ -22,9 +25,11 @@ from src.config import (
     MAX_CELL_SIZE,
     OVERLAY_ALPHA
 )
+from src.focus_detection import compute_in_focus_mask
+import numpy as np
 
 def main():
-    parser = argparse.ArgumentParser(description="Automated RGC Counting")
+    parser = argparse.ArgumentParser(description="Automated RGC Counting with optional Focus Masking")
     parser.add_argument("--input_dir", type=str, default="input",
                         help="Folder containing .tif images")
     parser.add_argument("--output_dir", type=str, default="Outputs",
@@ -43,10 +48,15 @@ def main():
                         help="Override config.yaml GPU setting to True.")
     parser.add_argument("--no_gpu", action="store_true",
                         help="Override config.yaml GPU setting to False.")
-    parser.add_argument("--apply_blur", action="store_true",
-                        help="Apply Gaussian blur to the image before segmentation.")
     parser.add_argument("--apply_clahe", action="store_true",
                         help="Apply CLAHE to enhance contrast before segmentation.")
+    
+    # New mutually exclusive group for focus mask
+    focus_group = parser.add_mutually_exclusive_group()
+    focus_group.add_argument("--focus_mask", action="store_true",
+                             help="Enable focus-based masking approach.")
+    focus_group.add_argument("--no_focus_mask", action="store_true",
+                             help="Disable focus-based masking approach.")
 
     args = parser.parse_args()
     
@@ -60,7 +70,7 @@ def main():
     min_size = args.min_size if args.min_size is not None else MIN_CELL_SIZE
     max_size = args.max_size if args.max_size is not None else MAX_CELL_SIZE
     
-    # Special handling for GPU flag to allow explicit disable
+    # Special handling for GPU flag
     if args.no_gpu:
         use_gpu = False
     elif args.use_gpu:
@@ -78,10 +88,20 @@ def main():
     else:
         print("[INFO] Using CPU for Cellpose (GPU not enabled).")
     # ----------------------------
+    
+    # Decide whether to use focus detection or not
+    if args.no_focus_mask:
+        focus_masking_enabled = False
+    elif args.focus_mask:
+        focus_masking_enabled = True
+    else:
+        # default behavior if neither is specified
+        # You can set the default to True or False depending on your preference
+        focus_masking_enabled = True  
 
-    # Walk through all subdirectories
+    # Walk through all subdirectories in the input folder
     for root, dirs, files in os.walk(args.input_dir):
-        # Skip if no TIFF files in this directory
+        # Filter only TIFF files
         tiff_files = [f for f in files if f.lower().endswith(('.tif', '.tiff'))]
         if not tiff_files:
             continue
@@ -96,54 +116,75 @@ def main():
         if not os.path.exists(current_output_dir):
             os.makedirs(current_output_dir)
 
-        # Load images from current directory
         image_list = utils.load_tiff_images(root)
         results = []
         
         print(f"\n[INFO] Processing directory: {root}")
         print(f"[INFO] Found {len(image_list)} images to process")
         
-        # Process each image
         for i, (filepath, img) in enumerate(image_list, start=1):
             print(f"[INFO] Processing image {i} of {len(image_list)}: {os.path.basename(filepath)}")
-            # Ensure grayscale
+            
+            # Convert to grayscale
             gray_img = utils.ensure_grayscale(img)
             
-            # (Optional) Apply Gaussian blur if requested
-            if args.apply_blur:
-                gray_img = apply_gaussian_blur(gray_img, ksize=3)
-
             # (Optional) Apply CLAHE if requested
             if args.apply_clahe:
-                # Using default clipLimit=2.0 and tileGridSize=(8,8)
                 gray_img = apply_clahe(gray_img, clip_limit=2.0, tile_grid_size=(8,8))
             
-            # Segment cells with Cellpose
+            if focus_masking_enabled:
+                # 1) Compute in-focus mask
+                in_focus_mask = compute_in_focus_mask(
+                    gray_img,
+                    tile_size=64,
+                    focus_threshold=50,   # tune as needed
+                    morph_kernel=5        # tune as needed
+                )
+                # 2) Zero out the out-of-focus pixels
+                masked_img = gray_img.copy()
+                masked_img[~in_focus_mask] = 0
+                
+                segmentation_input = masked_img
+            else:
+                # Skip focus-based masking; everything is considered "in focus"
+                in_focus_mask = np.ones_like(gray_img, dtype=bool)
+                segmentation_input = gray_img
+            
+            # 3) Segment cells with Cellpose
             masks, flows, styles, diams = segment_cells_cellpose(
-                gray_img,
+                segmentation_input,
                 diameter=diameter,
                 model_type=model_type,
                 channels=[0, 0],
                 use_gpu=use_gpu
             )
             
-            # Postprocessing
+            # 4) Postprocess (filter by size, etc.)
             masks_filtered = postprocess_masks(
                 masks, 
                 min_size=min_size, 
                 max_size=max_size
             )
             
-            # Analysis
-            cell_count, area_mm2, density_cells_per_mm2 = compute_cell_count_and_density(masks_filtered)
+            # 5) Analysis (only compute area in the in-focus region)
+            cell_count, area_mm2, density_cells_per_mm2 = compute_cell_count_and_density(masks_filtered, in_focus_mask)
             
-            # (Optional) Debug overlay
+            # 6) (Optional) Debug overlay
             if args.save_debug:
+                # a) Show segmented cells in color
                 debug_image = create_debug_overlay(gray_img, masks_filtered, alpha=OVERLAY_ALPHA)
+                
+                # b) If focus masking was enabled, gray-out out-of-focus region
+                if focus_masking_enabled:
+                    out_of_focus_overlay = apply_out_of_focus_overlay(debug_image, in_focus_mask, alpha=0.3)
+                    final_debug = out_of_focus_overlay
+                else:
+                    final_debug = debug_image
+                
                 debug_filename = os.path.basename(filepath).replace('.tif','_debug.png')
-                save_debug_image(debug_image, os.path.join(current_output_dir, debug_filename))
+                save_debug_image(final_debug, os.path.join(current_output_dir, debug_filename))
             
-            # Store result for CSV
+            # 7) Store result
             results.append({
                 'filename': os.path.basename(filepath),
                 'cell_count': cell_count,
@@ -154,7 +195,7 @@ def main():
             print(f"Processed {os.path.basename(filepath)} | "
                   f"Cells: {cell_count}, Density: {density_cells_per_mm2:.2f} cells/mm^2")
         
-        # Save CSV for current directory
+        # 8) Save CSV for current directory
         csv_path = os.path.join(current_output_dir, "results.csv")
         save_results_to_csv(results, csv_path)
         print(f"\nResults for {root} saved to {csv_path}")
