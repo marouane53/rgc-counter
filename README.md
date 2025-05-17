@@ -16,6 +16,7 @@ This project provides an automated pipeline for:
 - Python 3.8 or higher
 - CUDA-capable GPU (recommended for faster processing)
 - Windows 10 or higher
+- macOS 11 or higher
 
 ## Installation
 
@@ -28,7 +29,10 @@ cd rgc-counter
 2. Create and activate a virtual environment (recommended):
 ```bash
 python -m venv .venv
+# Windows
 .venv\Scripts\activate
+# macOS/Linux
+source .venv/bin/activate
 ```
 
 3. Install the required packages:
@@ -52,7 +56,8 @@ rgc-counter/
 │   └── utils.py              # Utility functions
 ├── main.py           # Main script for image processing
 ├── config.yaml       # Configuration file for pipeline settings
-└── run_pipeline.bat  # Interactive batch script with parameter customization
+├── run_pipeline.bat  # Interactive batch script for Windows
+└── run_pipeline.sh   # Interactive batch script for macOS/Linux
 ```
 
 ## Usage
@@ -62,7 +67,8 @@ rgc-counter/
 The easiest way to use the pipeline is through the interactive batch script:
 
 1. Place your .tif images in the `input/` folder
-2. Double-click `run_pipeline.bat` or run it from the command prompt
+2. On **Windows**, double-click `run_pipeline.bat` or run it from the command prompt.
+   On **macOS/Linux**, run `./run_pipeline.sh` from the terminal.
 3. Follow the interactive prompts to configure:
    - Input/output directories
    - Cell diameter (or let Cellpose auto-estimate)
