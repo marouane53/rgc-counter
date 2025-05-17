@@ -1,16 +1,17 @@
---extra-index-url https://download.pytorch.org/whl/cu118
-torch==2.1.2+cu118
-torchvision==0.16.2+cu118
-torchaudio==2.1.2+cu118
+# PyTorch and friends
+# Use CPU builds by default for cross-platform compatibility.
+# Install GPU-specific wheels manually if desired.
+torch==2.1.2
+torchvision==0.16.2
+torchaudio==2.1.2
 numpy<2.0
 
-cellpose[gpu]
+cellpose
 opencv-python
 matplotlib
 scipy
 tifffile
 pyyaml
-
 
 napari
 pyqt5  # or PySide2, depending on your environment
