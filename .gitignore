@@ -3,6 +3,7 @@ Outputs/
 input/*
 !input/.gitkeep
 pip_install_log.txt
+run_pipeline_log.txt
 
 # Python cache and virtual environments
 __pycache__/
@@ -76,7 +77,6 @@ wheels/
 Outputs/
 input/*
 !input/.gitkeep
-pip_install_log.txt
 
 # IDE-related files
 .vscode/
