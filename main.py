@@ -152,7 +152,7 @@ def main():
             else:  # focus_mode == "auto"
                 in_focus_mask = compute_in_focus_mask_auto(
                     gray_img,
-                    tile_size=64,
+                    tile_size=32,
                     focus_threshold=50,
                     brightness_min=20,
                     brightness_max=230,

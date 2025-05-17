@@ -6,9 +6,10 @@ A Python-based tool for automated Retinal Ganglion Cell (RGC) counting and analy
 
 This project provides an automated pipeline for:
 - Cell segmentation using Cellpose
+- Intelligent focus region detection
 - Post-processing of segmentation results
 - Analysis and visualization of cell counts
-- Batch processing capabilities for multiple images
+- Interactive batch processing with customizable parameters
 
 ## Prerequisites
 
@@ -39,67 +40,90 @@ pip install -r requirements.txt
 
 ```
 rgc-counter/
-├── input/             # Place your input images here (not tracked by git)
+├── input/             # Place your input .tif images here (not tracked by git)
 ├── Outputs/           # Results will be saved here (not tracked by git)
 ├── src/
 │   ├── cell_segmentation.py    # Cell detection using Cellpose
+│   ├── focus_detection.py      # Focus region detection
 │   ├── postprocessing.py       # Post-processing of results
 │   ├── analysis.py            # Analysis functions
 │   ├── visualize.py           # Visualization tools
 │   ├── config.py             # Configuration settings
 │   └── utils.py              # Utility functions
-├── main.py           # Main script for single image processing
+├── main.py           # Main script for image processing
 ├── config.yaml       # Configuration file for pipeline settings
-└── run_pipeline.bat  # Batch script for processing multiple images
+└── run_pipeline.bat  # Interactive batch script with parameter customization
 ```
 
 ## Usage
 
-### Single Image Processing
+### Interactive Batch Processing
 
-To process a single image:
+The easiest way to use the pipeline is through the interactive batch script:
+
+1. Place your .tif images in the `input/` folder
+2. Double-click `run_pipeline.bat` or run it from the command prompt
+3. Follow the interactive prompts to configure:
+   - Input/output directories
+   - Cell diameter (or let Cellpose auto-estimate)
+   - Debug overlay options
+   - GPU usage
+   - CLAHE contrast enhancement
+   - Focus detection mode
+
+### Focus Detection Modes
+
+The pipeline offers three focus detection modes:
+
+1. **No Focus Bounding**: Analyzes the entire image without focus detection
+2. **Manual Bounding-Box**: Opens Napari for manual selection of focus regions
+3. **Automatic Tile-based**: Uses improved automatic focus detection algorithm
+
+### Command Line Usage
+
+For direct command line usage:
 
 ```bash
-python main.py --input_dir input --output_dir Outputs
+python main.py --input_dir "input" --output_dir "Outputs" [OPTIONS]
 ```
 
-Additional options:
-```bash
-python main.py --help
-```
-
-### Batch Processing
-
-1. Place your images in the `input/` folder (they won't be tracked by git)
-2. Configure settings in `config.yaml` if needed
-3. Run the batch script:
-   - Double-click `run_pipeline.bat`, or
-   - Open command prompt and run:
-```bash
-run_pipeline.bat
-```
-
-The pipeline will:
-- Process all images in the `input/` folder and its subdirectories
-- Automatically create corresponding output directories
-- Save results in the `Outputs/` folder
-- Generate analysis reports and visualizations
+Available options:
+- `--diameter`: Cell diameter in pixels (optional)
+- `--save_debug`: Save debug overlays
+- `--use_gpu`: Enable GPU acceleration
+- `--apply_clahe`: Apply CLAHE contrast enhancement
+- `--focus_none`: Analyze entire image
+- `--focus_bbox`: Enable manual focus selection
+- `--focus_auto`: Use automatic focus detection
 
 ## Output Structure
 
 For each processed image, you'll find in the `Outputs/` directory:
 - Segmentation masks
-- Visual results and overlays
+- Focus region maps (if focus detection is enabled)
+- Visual results and overlays (if debug mode is enabled)
 - CSV files with cell counts and metrics
-- The directory structure will mirror your input directory structure
+- The directory structure mirrors your input directory structure
 
 ## Configuration
 
 Edit `config.yaml` to customize:
 - Cell detection parameters
-- Analysis settings
-- Output formats
+- Focus detection settings
+- Analysis thresholds
 - Visualization options
+- Output formats
+
+## Performance Tips
+
+1. **GPU Acceleration**: Enable GPU support for significantly faster processing
+2. **Focus Detection**: 
+   - Use automatic mode for batch processing
+   - Manual mode provides highest accuracy but requires user interaction
+3. **CLAHE Enhancement**: Enable for images with poor contrast
+4. **Cell Diameter**: 
+   - Specify if known for better accuracy
+   - Leave blank for automatic estimation
 
 ## Git Integration
 
@@ -124,6 +148,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Acknowledgments
 
 - [Cellpose](https://github.com/mouseland/cellpose) for cell segmentation
+- [Napari](https://napari.org/) for interactive visualization
 
 ## Support
 
