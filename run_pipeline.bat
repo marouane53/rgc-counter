@@ -97,36 +97,53 @@ if /I "%clahe_choice%"=="y" (
 )
 
 echo.
-echo --------------------------------------------------
-echo Choose focus mode for each image:
-echo (1) No focus bounding (analyze entire image)
-echo (2) Manual bounding-box in Napari
-echo (3) Automatic tile-based focus detection (improved)
-echo --------------------------------------------------
-set /p focus_mode_choice="Enter 1, 2, or 3: "
+set /p backend_choice="Segmentation backend (cellpose/stardist/sam) [default cellpose]: "
+if "%backend_choice%"=="" (
+    set backend_arg=
+) else (
+    set backend_arg=--backend %backend_choice%
+)
 
-if "%focus_mode_choice%"=="1" goto focus_none
-if "%focus_mode_choice%"=="2" goto focus_bbox
-if "%focus_mode_choice%"=="3" goto focus_auto
-goto focus_invalid
+echo.
+set /p tta_choice="Enable TTA? (y/n): "
+if /I "%tta_choice%"=="y" (
+    set tta_arg=--tta
+) else (
+    set tta_arg=
+)
 
-:focus_none
-set "focus_mode_arg=--focus_none"
-goto focus_done
+echo.
+set /p spatial_choice="Compute spatial stats (NNRI/VDRI/Ripley)? (y/n): "
+if /I "%spatial_choice%"=="y" (
+    set spatial_arg=--spatial_stats
+) else (
+    set spatial_arg=
+)
 
-:focus_bbox
-set "focus_mode_arg=--focus_bbox"
-goto focus_done
+echo.
+set /p zarr_choice="Save OME-Zarr (image + labels)? (y/n): "
+if /I "%zarr_choice%"=="y" (
+    set zarr_arg=--save_ome_zarr
+) else (
+    set zarr_arg=
+)
 
-:focus_auto
-set "focus_mode_arg=--focus_auto"
-goto focus_done
+echo.
+set /p report_choice="Write HTML report? (y/n): "
+if /I "%report_choice%"=="y" (
+    set report_arg=--write_html_report
+) else (
+    set report_arg=
+)
 
-:focus_invalid
-echo Invalid choice. Defaulting to (1) No focus bounding.
-set "focus_mode_arg=--focus_none"
+echo.
+echo (Focus) 1 None  2 BBox  3 Legacy Auto  4 QC Multi-metric
+set /p focus_choice="Enter 1-4: "
+if "%focus_choice%"=="2" set "focus_mode_arg=--focus_bbox"
+if "%focus_choice%"=="3" set "focus_mode_arg=--focus_auto"
+if "%focus_choice%"=="4" set "focus_mode_arg=--focus_qc"
+if "%focus_choice%"=="1" set "focus_mode_arg=--focus_none"
 
-:focus_done
 echo.
 echo --------------------------------------------------
 echo Now running the main pipeline...
@@ -139,7 +156,12 @@ python main.py ^
   %debug_arg% ^
   %gpu_arg% ^
   %clahe_arg% ^
-  %focus_mode_arg%
+  %focus_mode_arg% ^
+  %backend_arg% ^
+  %tta_arg% ^
+  %spatial_arg% ^
+  %zarr_arg% ^
+  %report_arg%
 
 echo Return code: %ERRORLEVEL%
 pause

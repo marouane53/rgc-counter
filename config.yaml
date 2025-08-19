@@ -2,15 +2,46 @@ microns_per_pixel: 0.227
 
 # Cell detection parameters
 cell_detection:
-  diameter: null  # Set to null for auto-estimation
-  model_type: 'cyto'  # Options: 'cyto' or 'nuclei'
+  diameter: null
+  model_type: 'cyto'   # 'cyto' or 'nuclei' or a custom model path
   use_gpu: true
+  backend: 'cellpose'  # 'cellpose' | 'stardist' | 'sam' (optional if SAM is installed)
 
 # Analysis settings
 analysis:
-  min_cell_size: 10  # minimum cell size in pixels (default from original main.py)
-  max_cell_size: 10000  # maximum cell size in pixels (default from original main.py)
+  min_cell_size: 10
+  max_cell_size: 10000
+  compute_spatial_stats: false
+  optic_nerve_center: null   # [y, x] in pixels, or null for image center
+  ripley_radii: [25, 50, 75, 100, 150, 200]  # pixels, scaled by MPP in analysis
 
 # Visualization options
 visualization:
-  overlay_alpha: 0.5  # transparency for debug overlays (0-1)
+  overlay_alpha: 0.5
+  save_debug: false
+
+# I/O options
+io:
+  save_ome_zarr: false
+  ome_zarr_chunk: 256
+  write_html_report: true
+
+# QC options
+qc:
+  tile_size: 64
+  brightness_min: 20
+  brightness_max: 230
+  laplacian_z: 1.0            # weight
+  tenengrad_z: 1.0            # weight
+  highfreq_z: 1.0             # weight
+  threshold_z: 0.0            # tiles with combined z >= threshold considered in-focus
+  morph_kernel: 5
+
+# Phenotype rules (optional path). Use phenotype_rules.example.yaml as a template.
+phenotype_rules: null
+
+# Uncertainty / TTA
+tta:
+  enabled: false
+  transforms: ['flip_h', 'flip_v', 'rot90', 'rot270']  # applied to segmentation input
+  combine: 'pixel_vote'  # or 'choose_best_iou'

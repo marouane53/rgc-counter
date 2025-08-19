@@ -1,15 +1,19 @@
 # RGC Counter
 
-A Python-based tool for automated Retinal Ganglion Cell (RGC) counting and analysis using deep learning.
+Modular, production‑ready RGC analysis suite for automated Retinal Ganglion Cell (RGC) counting with pluggable segmenters, multi‑metric focus QC, optional marker‑aware filtering, spatial statistics, TTA uncertainty, OME‑TIFF/OME‑Zarr I/O, and an optional optic‑nerve axon module.
 
 ## Description
 
 This project provides an automated pipeline for:
-- Cell segmentation using Cellpose
-- Intelligent focus region detection
-- Post-processing of segmentation results
-- Analysis and visualization of cell counts
-- Interactive batch processing with customizable parameters
+- Cell segmentation via pluggable backends (Cellpose default, StarDist optional, experimental SAM)
+- Focus region detection (legacy auto and robust multi‑metric QC)
+- Optional marker‑aware inclusion/exclusion using phenotype rules
+- Post-processing, counts, densities, and spatial mosaic statistics (NNRI, VDRI, Ripley’s K)
+- Test‑time augmentation (TTA) with pixel‑vote uncertainty
+- OME‑TIFF/OME‑Zarr I/O and HTML reporting
+- Optional optic nerve axon analysis via AxonDeepSeg
+
+If you used the previous “solid script” pipeline, all new features are opt‑in — your existing workflow still works.
 
 ## Prerequisites
 
@@ -40,25 +44,49 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Notes:
+- StarDist backend requires `stardist` and `csbdeep` (already listed in requirements).
+- SAM backend requires installing `segment-anything` and providing a model checkpoint manually (not pinned here).
+- Optic nerve module calls the `AxonDeepSeg` CLI if it is installed system‑wide.
+
 ## Project Structure
 
 ```
 rgc-counter/
-├── input/             # Place your input .tif images here (not tracked by git)
-├── Outputs/           # Results will be saved here (not tracked by git)
+├── input/
+├── Outputs/
 ├── src/
-│   ├── cell_segmentation.py    # Cell detection using Cellpose
-│   ├── focus_detection.py      # Focus region detection
-│   ├── postprocessing.py       # Post-processing of results
-│   ├── analysis.py            # Analysis functions
-│   ├── visualize.py           # Visualization tools
-│   ├── config.py             # Configuration settings
-│   └── utils.py              # Utility functions
-├── main.py           # Main script for image processing
-├── config.yaml       # Configuration file for pipeline settings
-├── run_pipeline.bat  # Interactive batch script for Windows
-└── run_pipeline.sh   # Interactive batch script for macOS/Linux
+│   ├── __init__.py
+│   ├── analysis.py
+│   ├── axon.py                 # Optic nerve (AxonDeepSeg) integration
+│   ├── cell_segmentation.py
+│   ├── config.py
+│   ├── focus_detection.py
+│   ├── io_ome.py               # OME‑TIFF/OME‑Zarr I/O
+│   ├── models.py               # Segmenter factory (Cellpose/StarDist/SAM)
+│   ├── phenotype.py            # Marker‑aware filtering rules
+│   ├── postprocessing.py
+│   ├── qc.py                   # Multi‑metric focus QC
+│   ├── report.py               # HTML report generator
+│   ├── spatial.py              # Spatial statistics
+│   ├── uncertainty.py          # TTA uncertainty
+│   └── utils.py                # Universal loader + helpers
+├── config.yaml                 # Suite configuration (see below)
+├── phenotype_rules.example.yaml# Template for marker‑aware rules
+├── main.py                     # CLI wiring for all modules
+├── requirements.txt
+├── run_pipeline.bat            # Interactive batch (Windows)
+└── run_pipeline.sh             # Interactive batch (macOS/Linux)
 ```
+
+## Key Features
+- Pluggable segmenters: `cellpose` (default), `stardist`, or `sam`.
+- Focus QC: combine Laplacian variance, Tenengrad, and high‑frequency metrics per tile.
+- Marker‑aware logic: require positive markers and exclude confounds via phenotype rules.
+- Spatial stats: NNRI, Voronoi regularity (VDRI), Ripley’s K; optional isodensity maps.
+- TTA uncertainty: flips/rotations with pixel‑level voting.
+- I/O: robust OME‑TIFF loading, optional OME‑Zarr writing for napari/QuPath.
+- Reporting: HTML report with run info, summary table, and saved visuals.
 
 ## Usage
 
@@ -75,15 +103,16 @@ The easiest way to use the pipeline is through the interactive batch script:
    - Debug overlay options
    - GPU usage
    - CLAHE contrast enhancement
-   - Focus detection mode
+   - Focus detection mode (None / BBox / Legacy Auto / QC)
+   - Segmentation backend, TTA, spatial stats, OME‑Zarr, and HTML report
 
 ### Focus Detection Modes
 
-The pipeline offers three focus detection modes:
-
-1. **No Focus Bounding**: Analyzes the entire image without focus detection
-2. **Manual Bounding-Box**: Opens Napari for manual selection of focus regions
-3. **Automatic Tile-based**: Uses improved automatic focus detection algorithm
+The pipeline offers four focus modes:
+1. **None**: Analyze the entire image
+2. **BBox**: Napari-assisted bounding box per image
+3. **Legacy Auto**: Brightness + Laplacian thresholding (fast)
+4. **QC**: Multi‑metric focus QC (recommended for batch data)
 
 ### Command Line Usage
 
@@ -93,32 +122,59 @@ For direct command line usage:
 python main.py --input_dir "input" --output_dir "Outputs" [OPTIONS]
 ```
 
-Available options:
-- `--diameter`: Cell diameter in pixels (optional)
-- `--save_debug`: Save debug overlays
-- `--use_gpu`: Enable GPU acceleration
-- `--apply_clahe`: Apply CLAHE contrast enhancement
-- `--focus_none`: Analyze entire image
-- `--focus_bbox`: Enable manual focus selection
-- `--focus_auto`: Use automatic focus detection
+Common options (see `python main.py -h` for full list):
+- `--backend {cellpose,stardist,sam}`: Choose segmenter backend
+- `--focus_none|--focus_bbox|--focus_auto|--focus_qc`: Focus modes
+- `--tta [--tta_transforms flip_h flip_v rot90 ...]`: Enable TTA
+- `--phenotype_config phenotype_rules.yaml`: Marker‑aware filtering
+- `--spatial_stats`: Compute NNRI/VDRI/Ripley’s K
+- `--save_ome_zarr`: Save image + labels as OME‑Zarr
+- `--write_html_report`: Generate HTML report
+- `--save_debug`, `--apply_clahe`, `--use_gpu/--no_gpu`, `--diameter`, `--min_size`, `--max_size`
 
-## Output Structure
+Examples:
+```bash
+# Backward‑compatible run
+python main.py --input_dir input --output_dir Outputs --save_debug
 
-For each processed image, you'll find in the `Outputs/` directory:
-- Segmentation masks
-- Focus region maps (if focus detection is enabled)
-- Visual results and overlays (if debug mode is enabled)
-- CSV files with cell counts and metrics
-- The directory structure mirrors your input directory structure
+# Robust focus QC, spatial stats, and report
+python main.py \
+  --input_dir input --output_dir Outputs \
+  --focus_qc --backend cellpose --spatial_stats \
+  --write_html_report --save_ome_zarr --save_debug
+
+# Marker‑aware counting
+python main.py --input_dir input --output_dir Outputs \
+  --focus_qc --phenotype_config phenotype_rules.example.yaml --save_debug
+
+# Test‑time augmentation
+python main.py --input_dir input --output_dir Outputs \
+  --tta --tta_transforms flip_h flip_v rot90
+
+# Optic nerve axons (requires AxonDeepSeg CLI)
+python main.py --input_dir input --output_dir Outputs --axon_dir optic_nerve_images
+```
+
+## Outputs
+
+- `Outputs/results.csv`: Summary table with counts, area, density, backend, and optional spatial metrics.
+- Debug overlays: `<image>_debug.png` when `--save_debug` is given.
+- Isodensity maps: `<image>_isodensity.png` when `--spatial_stats` and `--save_debug` are used.
+- OME‑Zarr stores: `<image>.zarr` when `--save_ome_zarr` is used.
+- HTML report: `Outputs/report.html` when `--write_html_report` is used.
 
 ## Configuration
 
 Edit `config.yaml` to customize:
-- Cell detection parameters
-- Focus detection settings
-- Analysis thresholds
-- Visualization options
-- Output formats
+- `cell_detection`: diameter, model_type, backend, use_gpu
+- `analysis`: min/max cell size, spatial settings
+- `visualization`: overlay_alpha, save_debug
+- `io`: save_ome_zarr, write_html_report, chunk size
+- `qc`: tile_size, brightness range, metric weights, threshold
+- `tta`: enabled, transforms, combiner
+- `phenotype_rules`: path to a rules YAML (see `phenotype_rules.example.yaml`)
+
+Phenotype rules let you require marker positivity and exclude confounds like microglia overlap. See the example YAML for channel mapping, thresholds, and morphology priors.
 
 ## Performance Tips
 
@@ -153,8 +209,11 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Acknowledgments
 
-- [Cellpose](https://github.com/mouseland/cellpose) for cell segmentation
-- [Napari](https://napari.org/) for interactive visualization
+- [Cellpose](https://github.com/mouseland/cellpose)
+- [StarDist](https://github.com/stardist/stardist) and [CSBDeep](https://github.com/CSBDeep/CSBDeep)
+- [AICSImageIO](https://github.com/AllenCellModeling/aicsimageio) / [OME‑Zarr](https://github.com/ome/ome-zarr-py)
+- [Napari](https://napari.org/)
+- [AxonDeepSeg](https://github.com/neuropoly/axondeepseg)
 
 ## Support
 

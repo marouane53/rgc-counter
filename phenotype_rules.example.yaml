@@ -1,0 +1,21 @@
+# Example phenotype rules for marker-aware RGC counting.
+# Adjust channels and thresholds to your lab’s protocol.
+
+channels:
+  rgc_channel: 0          # index for RBPMS channel, or the cell soma channel
+  microglia_channel: 1     # index for Iba1 (if present); set to null if not available
+
+thresholds:
+  rgc_min_intensity: 120   # 0-255 after contrast normalization
+  microglia_min_intensity: 120
+
+logic:
+  # Keep an object if it is RGC-positive AND NOT overlapping with microglia-positive mask
+  require_rgc_positive: true
+  exclude_microglia_overlap: true
+
+morphology_priors:
+  min_area_px: 30
+  max_area_px: 5000
+  min_circularity: 0.2     # 4*pi*area / perimeter^2
+

@@ -1,17 +1,36 @@
+# Core numerical
+numpy<2.0
+scipy==1.11.4
+matplotlib==3.8.2
+opencv-python==4.8.1.78
+pyyaml==6.0.1
+tifffile==2023.12.9
+
 # PyTorch and friends
 # Use CPU builds by default for cross-platform compatibility.
 # Install GPU-specific wheels manually if desired.
 torch==2.2.2
 torchvision==0.17.2
 torchaudio==2.2.2
-numpy<2.0
 
+# Existing
 cellpose==3.1.0
-opencv-python==4.8.1.78
-matplotlib==3.8.2
-scipy==1.11.4
-tifffile==2023.12.9
-pyyaml==6.0.1
-
 napari==0.4.18
-pyqt5==5.15.9  # or PySide2, depending on your environment
+pyqt5==5.15.9
+
+# I/O and NGFF
+aicsimageio==4.14.0
+ome-zarr==0.8.3
+zarr==2.16.1
+
+# Spatial + stats
+scikit-image==0.22.0
+scikit-learn==1.4.2
+
+# Optional segmenters. These can be commented if you do not need them.
+stardist==0.8.5
+csbdeep==0.7.4
+
+# For HTML reporting
+jinja2==3.1.4
+pandas==2.2.2

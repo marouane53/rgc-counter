@@ -67,22 +67,28 @@ else
     clahe_arg=""
 fi
 
-echo "--------------------------------------------------"
-echo "Choose focus mode for each image:"
-echo "(1) No focus bounding (analyze entire image)"
-echo "(2) Manual bounding-box in Napari"
-echo "(3) Automatic tile-based focus detection (improved)"
-echo "--------------------------------------------------"
-read -p "Enter 1, 2, or 3: " focus_mode_choice
+read -p "Segmentation backend (cellpose/stardist/sam) [default cellpose]: " backend_choice
+if [ -n "$backend_choice" ]; then backend_arg="--backend $backend_choice"; else backend_arg=""; fi
 
+read -p "Enable TTA? (y/n): " tta_choice
+if [[ "$tta_choice" =~ ^[Yy]$ ]]; then tta_arg="--tta"; else tta_arg=""; fi
+
+read -p "Compute spatial stats (NNRI/VDRI/Ripley)? (y/n): " spatial_choice
+if [[ "$spatial_choice" =~ ^[Yy]$ ]]; then spatial_arg="--spatial_stats"; else spatial_arg=""; fi
+
+read -p "Save OME-Zarr (image + labels)? (y/n): " zarr_choice
+if [[ "$zarr_choice" =~ ^[Yy]$ ]]; then zarr_arg="--save_ome_zarr"; else zarr_arg=""; fi
+
+read -p "Write HTML report? (y/n): " report_choice
+if [[ "$report_choice" =~ ^[Yy]$ ]]; then report_arg="--write_html_report"; else report_arg=""; fi
+
+echo "(Focus) 1 None  2 BBox  3 Legacy Auto  4 QC Multi-metric"
+read -p "Enter 1-4: " focus_mode_choice
 case "$focus_mode_choice" in
-    1) focus_mode_arg="--focus_none" ;;
-    2) focus_mode_arg="--focus_bbox" ;;
-    3) focus_mode_arg="--focus_auto" ;;
-    *)
-        echo "Invalid choice. Defaulting to (1) No focus bounding."
-        focus_mode_arg="--focus_none"
-        ;;
+  2) focus_mode_arg="--focus_bbox" ;;
+  3) focus_mode_arg="--focus_auto" ;;
+  4) focus_mode_arg="--focus_qc" ;;
+  *) focus_mode_arg="--focus_none" ;;
 esac
 
 echo "--------------------------------------------------"
@@ -96,7 +102,11 @@ python main.py \
   $debug_arg \
   $gpu_arg \
   $clahe_arg \
-  $focus_mode_arg
+  $focus_mode_arg \
+  $backend_arg \
+  $tta_arg \
+  $spatial_arg \
+  $zarr_arg \
+  $report_arg
 
 echo "Return code: $?"
-
