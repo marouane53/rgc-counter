@@ -1,0 +1,8 @@
+retina_region_schema,region_axis,region_label,expected_density
+mouse_flatmount_v1,ring,central,1200
+mouse_flatmount_v1,ring,pericentral,900
+mouse_flatmount_v1,ring,peripheral,700
+mouse_flatmount_v1,quadrant,dorsal_temporal,950
+mouse_flatmount_v1,quadrant,dorsal_nasal,900
+mouse_flatmount_v1,quadrant,ventral_nasal,850
+mouse_flatmount_v1,quadrant,ventral_temporal,900

@@ -1,0 +1,5 @@
+selection_metric: mae
+grid:
+  - qc.threshold_z: -0.5
+  - qc.threshold_z: 0.0
+  - qc.threshold_z: 0.5

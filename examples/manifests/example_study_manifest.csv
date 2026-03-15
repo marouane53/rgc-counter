@@ -1,0 +1,3 @@
+sample_id,animal_id,eye,condition,genotype,timepoint_dpi,modality,stain_panel,path,onh_x_px,onh_y_px,dorsal_x_px,dorsal_y_px
+EX01_OD,M01,OD,treated,WT,7,flatmount,RBPMS,../smoke_data/example_retina_a.tif,48,48,48,14
+EX01_OS,M01,OS,control,WT,7,flatmount,RBPMS,../smoke_data/example_retina_b.tif,48,48,48,14

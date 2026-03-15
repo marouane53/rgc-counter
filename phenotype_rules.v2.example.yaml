@@ -1,0 +1,30 @@
+schema_version: 2
+
+channels:
+  RBPMS: 0
+  IBA1: 1
+  GFAP: 2
+
+masks:
+  rgc_positive:
+    channel: RBPMS
+    min_intensity: 180
+  microglia:
+    channel: IBA1
+    min_intensity: 180
+
+classes:
+  rgc:
+    priority: 100
+    include:
+      - {feature: relation.overlap_fraction, target: rgc_positive, op: gt, value: 0.0}
+      - {feature: geometry.area_px, op: ge, value: 100}
+      - {feature: geometry.area_px, op: le, value: 1000}
+      - {feature: geometry.circularity, op: ge, value: 0.2}
+    exclude:
+      - {feature: relation.overlap_fraction, target: microglia, op: gt, value: 0.0}
+
+  microglia:
+    priority: 90
+    include:
+      - {feature: relation.overlap_fraction, target: microglia, op: gt, value: 0.0}

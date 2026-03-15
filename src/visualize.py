@@ -12,7 +12,11 @@ def create_debug_overlay(image, masks, alpha=OVERLAY_ALPHA):
     """
     # Make sure image is 0-255 range for visualization
     if image.dtype != np.uint8:
-        disp_img = (image / image.max() * 255).astype(np.uint8)
+        max_value = float(np.max(image)) if image.size else 0.0
+        if max_value <= 0.0:
+            disp_img = np.zeros_like(image, dtype=np.uint8)
+        else:
+            disp_img = (image / max_value * 255).astype(np.uint8)
     else:
         disp_img = image.copy()
     

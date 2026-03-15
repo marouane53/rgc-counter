@@ -1,5 +1,7 @@
 # Project specific
 Outputs/
+planning/
+test_subjects/
 input/*
 !input/.gitkeep
 pip_install_log.txt
@@ -186,3 +188,4 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+codebase/

@@ -1,0 +1,13 @@
+schema_version: 2
+
+channels:
+  RBPMS: 0
+
+classes:
+  rgc:
+    priority: 100
+    include:
+      - feature: channel.mean_z
+        channel: RBPMS
+        op: ge
+        value: 0.0

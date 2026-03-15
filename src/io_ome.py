@@ -49,14 +49,23 @@ def load_any_image(path: str) -> Tuple[np.ndarray, Dict[str, Any]]:
 
         return data, meta
     except Exception:
-        # Fallback to tifffile
+        # Fallback to tifffile for standard microscopy formats first
         try:
             import tifffile
             arr = tifffile.imread(path)
             meta["reader"] = "tifffile"
             return arr, meta
-        except Exception as e:
-            raise RuntimeError(f"Could not read image: {path}. Error: {e}") from e
+        except Exception:
+            # Final fallback for common non-TIFF images used in smoke tests and reports
+            try:
+                from PIL import Image
+
+                with Image.open(path) as img:
+                    arr = np.asarray(img)
+                meta["reader"] = "pillow"
+                return arr, meta
+            except Exception as e:
+                raise RuntimeError(f"Could not read image: {path}. Error: {e}") from e
 
 
 def save_labels_to_ome_zarr(image: np.ndarray,
@@ -107,4 +116,3 @@ def save_labels_to_ome_zarr(image: np.ndarray,
             f"Failed to write OME-Zarr to {out_dir}. "
             f"Install 'ome-zarr' and 'zarr' packages. Error: {e}"
         ) from e
-

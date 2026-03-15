@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rgc-counter"
+version = "0.6.0"
+description = "Local-first retinal spatial phenotyping suite for RGC analysis"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "numpy<2.0",
+  "scipy==1.11.4",
+  "matplotlib==3.8.2",
+  "opencv-python==4.8.1.78",
+  "pyyaml==6.0.1",
+  "tifffile==2023.12.9",
+  "torch==2.1.2",
+  "torchvision==0.16.2",
+  "torchaudio==2.1.2",
+  "cellpose==3.1.0",
+  "aicsimageio==4.14.0",
+  "ome-zarr==0.8.3",
+  "zarr==2.16.1",
+  "scikit-image==0.22.0",
+  "scikit-learn==1.4.2",
+  "jinja2==3.1.4",
+  "pandas==2.2.2",
+  "pyarrow==17.0.0",
+  "statsmodels==0.14.2",
+  "shapely==2.0.6",
+]
+
+[project.optional-dependencies]
+ui = [
+  "napari==0.4.18",
+  "pyqt5==5.15.9",
+  "qtpy",
+]
+stardist = [
+  "stardist==0.8.5",
+  "csbdeep==0.7.4",
+]
+dev = [
+  "pytest>=8,<9",
+]
+
+[project.scripts]
+rgc-counter = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["src", "src.*"]

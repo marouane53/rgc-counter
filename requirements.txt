@@ -26,6 +26,7 @@ zarr==2.16.1
 # Spatial + stats
 scikit-image==0.22.0
 scikit-learn==1.4.2
+shapely==2.0.6
 
 # Optional segmenters. These can be commented if you do not need them.
 stardist==0.8.5
@@ -34,3 +35,5 @@ csbdeep==0.7.4
 # For HTML reporting
 jinja2==3.1.4
 pandas==2.2.2
+pyarrow==17.0.0
+statsmodels==0.14.2

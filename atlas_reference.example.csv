@@ -1,0 +1,4 @@
+atlas_name,retina_region_schema,region_axis,region_label,expected_density_cells_per_mm2,expected_sd
+mouse_demo_v1,mouse_flatmount_v1,ring,central,1150,150
+mouse_demo_v1,mouse_flatmount_v1,ring,pericentral,950,120
+mouse_demo_v1,mouse_flatmount_v1,ring,peripheral,700,100
