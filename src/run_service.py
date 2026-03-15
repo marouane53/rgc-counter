@@ -23,6 +23,7 @@ from src.config import (
 from src.context import RunContext
 from src.io_ome import save_labels_to_ome_zarr
 from src.measurements import object_table_path_for, write_object_table
+from src.model_registry import ModelSpec, model_spec_to_dict, model_summary_fields, model_warning, resolve_model_spec
 from src.modalities import adapt_image_for_modality
 from src.models import build_segmenter
 from src.phenotype import load_rules
@@ -50,6 +51,9 @@ class RuntimeOptions:
     backend: str = "cellpose"
     diameter: float | None = None
     model_type: str | None = None
+    cellpose_model: str | None = None
+    stardist_weights: str | None = None
+    model_alias: str | None = None
     min_size: int | None = None
     max_size: int | None = None
     use_gpu: bool | None = None
@@ -94,6 +98,7 @@ class AppRuntime:
     pipeline: Any
     pipeline_cfg: dict[str, Any]
     resolved_config: dict[str, Any]
+    model_spec: ModelSpec
     backend: str
     diameter: float | None
     model_type: str
@@ -117,6 +122,11 @@ def _resolved_config(runtime: AppRuntime) -> dict[str, Any]:
         "backend": runtime.backend,
         "diameter": runtime.diameter,
         "model_type": runtime.model_type,
+        "cellpose_model": options.cellpose_model,
+        "stardist_weights": options.stardist_weights,
+        "model_alias": options.model_alias,
+        **model_summary_fields(runtime.model_spec),
+        "model_spec": model_spec_to_dict(runtime.model_spec),
         "min_size": runtime.min_size,
         "max_size": runtime.max_size,
         "use_gpu": runtime.use_gpu,
@@ -166,15 +176,38 @@ def build_runtime(
     min_size = int(options.min_size if options.min_size is not None else MIN_CELL_SIZE)
     max_size = int(options.max_size if options.max_size is not None else MAX_CELL_SIZE)
     use_gpu = bool(options.use_gpu) if options.use_gpu is not None else bool(USE_GPU and torch.cuda.is_available())
-    backend = (options.backend or "cellpose").lower()
+    if segmenter_override is not None and (options.backend or "cellpose").lower() not in {"cellpose", "stardist", "sam"}:
+        backend_name = (options.backend or "override").lower()
+        model_spec = ModelSpec(
+            backend=backend_name,
+            source="builtin",
+            model_label=f"{backend_name}_override:injected",
+            display_label=options.model_alias or f"{backend_name}_override:injected",
+            builtin_name=model_type,
+            asset_path=None,
+            model_type=model_type,
+            alias=options.model_alias,
+            trust_mode="builtin",
+        )
+    else:
+        model_spec = resolve_model_spec(
+            backend=options.backend,
+            model_type=model_type,
+            cellpose_model=options.cellpose_model,
+            stardist_weights=options.stardist_weights,
+            sam_checkpoint=options.sam_checkpoint,
+            model_alias=options.model_alias,
+        )
+    backend = model_spec.backend
+    warning = model_warning(model_spec)
+    if warning:
+        print(f"[WARNING] {warning}")
 
     phenotype_rules, phenotype_engine_config = _load_phenotype_configs(options)
     segmenter = segmenter_override or build_segmenter(
-        backend=backend,
+        model_spec=model_spec,
         diameter=diameter,
-        model_type=model_type,
         use_gpu=use_gpu,
-        sam_checkpoint=options.sam_checkpoint,
     )
     pipeline_cfg = {
         "apply_clahe": options.apply_clahe,
@@ -190,6 +223,7 @@ def build_runtime(
         "spatial_stats": options.spatial_stats,
         "backend": backend,
         "use_gpu": use_gpu,
+        "model_spec": model_summary_fields(model_spec),
         "phenotype_engine": options.phenotype_engine,
         "marker_metrics": options.marker_metrics,
         "interaction_metrics": options.interaction_metrics,
@@ -214,9 +248,10 @@ def build_runtime(
         pipeline=pipeline,
         pipeline_cfg=pipeline_cfg,
         resolved_config={},
+        model_spec=model_spec,
         backend=backend,
         diameter=diameter,
-        model_type=model_type,
+        model_type=model_spec.model_type or model_type,
         min_size=min_size,
         max_size=max_size,
         use_gpu=use_gpu,
@@ -257,6 +292,7 @@ def summarize_context(ctx: RunContext) -> str:
         f"Cells: {ctx.metrics.get('cell_count', 'n/a')}",
         f"Density: {density_text} cells/mm^2",
         f"Backend: {ctx.metrics.get('backend', ctx.seg_info.get('backend', 'unknown'))}",
+        f"Model: {ctx.metrics.get('model_label', 'unknown')}",
     ]
     if ctx.warnings:
         lines.append("Warnings:")
@@ -419,6 +455,8 @@ def export_context(
             {
                 "source": "napari",
                 "backend": runtime.backend,
+                "model_label": runtime.model_spec.model_label,
+                "model_source": runtime.model_spec.source,
                 "modality": runtime.options.modality,
                 "diameter": runtime.diameter,
                 "min_size": runtime.min_size,
@@ -444,6 +482,7 @@ def export_context(
                 run_started_at=runtime.created_at,
                 run_finished_at=datetime.now(),
                 results_csv_path=csv_path,
+                model_spec=model_spec_to_dict(runtime.model_spec),
             ),
         )
         ctx.artifacts["provenance"] = provenance_path

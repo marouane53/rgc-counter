@@ -58,6 +58,7 @@ Notes:
 - The napari UI requires the `ui` extras (`pip install -e .[ui]`) or the existing requirements install.
 - SAM backend requires installing `segment-anything` and providing a model checkpoint manually (not pinned here).
 - Optic nerve module calls the `AxonDeepSeg` CLI if it is installed system‑wide.
+- Custom checkpoints and weights are treated as trusted local assets only.
 
 ## Project Structure
 
@@ -180,6 +181,9 @@ python main.py --input_dir "input" --output_dir "Outputs" [OPTIONS]
 
 Common options (see `python main.py -h` for full list):
 - `--backend {cellpose,stardist,sam}`: Choose segmenter backend
+- `--cellpose_model path/to/model`: Use a trusted local custom Cellpose model
+- `--stardist_weights path/to/weights`: Use trusted local custom StarDist weights or a model directory
+- `--model_alias "lab-rgc-v1"`: Store a human-readable model label in provenance and reports
 - `--modality flatmount|oct|vis_octf|lightsheet`: Adapt non-flat-mount inputs into the shared analysis path
 - `--modality_projection max|mean|sum`: Projection mode for volumetric modality adapters
 - `--modality_channel_index N`: Channel index to use when a modality adapter needs one
@@ -210,6 +214,7 @@ Common options (see `python main.py -h` for full list):
 - `--write_uncertainty_maps`, `--write_qc_maps`: Persist TTA and QC maps as TIFFs
 - `--strict_schemas`: Fail fast if saved tables violate required contracts
 - `--save_debug`, `--apply_clahe`, `--use_gpu/--no_gpu`, `--diameter`, `--min_size`, `--max_size`
+- `--model_type`: Preferred for built-in Cellpose names; custom paths remain supported here only as a legacy compatibility mode
 
 Examples:
 ```bash
@@ -297,6 +302,29 @@ python main.py \
   --calibration_grid examples/calibration/calibration_grid.example.yaml \
   --no_gpu
 
+# Preferred custom Cellpose model selection
+python main.py \
+  --input_dir input \
+  --output_dir Outputs_custom_model \
+  --backend cellpose \
+  --cellpose_model /absolute/path/to/rgc_cellpose_model \
+  --model_alias "lab-rgc-v3" \
+  --write_object_table --write_provenance --no_gpu
+
+# Benchmark multiple models on a labeled subset
+python scripts/evaluate_models.py \
+  --model_manifest examples/models/model_manifest.example.csv \
+  --output_dir Outputs_model_eval \
+  --no_gpu
+
+# Fine-tune Cellpose from a train/validation manifest
+python scripts/train_cellpose.py \
+  --train_manifest examples/models/train_manifest.example.csv \
+  --output_dir Outputs_model_train \
+  --pretrained_model cyto \
+  --n_epochs 5 \
+  --no_gpu
+
 # Test‑time augmentation
 python main.py --input_dir input --output_dir Outputs \
   --tta --tta_transforms flip_h flip_v rot90
@@ -307,7 +335,7 @@ python main.py --input_dir input --output_dir Outputs --axon_dir optic_nerve_ima
 
 ## Outputs
 
-- `Outputs/results.csv`: Summary table with counts, area, density, backend, and optional spatial metrics.
+- `Outputs/results.csv`: Summary table with counts, area, density, backend, model identity, and optional spatial metrics.
 - `Outputs/objects/*_objects.parquet`: Per-object measurement tables when `--write_object_table` is used.
 - `Outputs/uncertainty/*_fgprob.tif`: Foreground-probability maps when `--write_uncertainty_maps` is used.
 - `Outputs/qc_maps/*_focus_score.tif`: Focus-score maps when `--write_qc_maps` is used.
@@ -323,6 +351,8 @@ python main.py --input_dir input --output_dir Outputs --axon_dir optic_nerve_ima
 - `Outputs_study/figures/*`: Cohort-level condition and paired-eye figures.
 - `Outputs_study/methods_appendix.md`: Table-driven methods appendix generated from the actual run configuration.
 - `Outputs_study/calibration/*`: Grid-search ranking, best parameters, agreement plots, and a calibration report when `--calibration_grid` is used.
+- `Outputs_model_eval/*`: Model ranking tables, per-run metrics, best-model metadata, and an evaluation report from `scripts/evaluate_models.py`.
+- `Outputs_model_train/*`: Cellpose fine-tuning config, copied manifest, training report, and checkpoint outputs from `scripts/train_cellpose.py`.
 - `Outputs/atlas/*` or `Outputs_study/atlas/*`: Optional atlas comparison tables when `--atlas_reference` is used.
 - `Outputs_study/tracking/*`: Optional longitudinal track observations and summaries when `--track_longitudinal` is used.
 - `Outputs_napari/*`: Optional single-image export bundle from the napari dock, including `results.csv`, overlays, object tables, report, and provenance.

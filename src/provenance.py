@@ -71,8 +71,10 @@ def build_run_provenance(
     run_started_at: datetime,
     run_finished_at: datetime,
     results_csv_path: str | Path,
+    study_statistics: dict[str, Any] | None = None,
+    model_spec: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "provenance_version": PROVENANCE_VERSION,
         "run_started_at": run_started_at,
         "run_finished_at": run_finished_at,
@@ -82,6 +84,11 @@ def build_run_provenance(
         "results_csv_path": str(results_csv_path),
         "images": [summarize_context(ctx) for ctx in contexts],
     }
+    if study_statistics is not None:
+        payload["study_statistics"] = study_statistics
+    if model_spec is not None:
+        payload["model_spec"] = model_spec
+    return payload
 
 
 def write_provenance(path: str | Path, payload: dict[str, Any]) -> Path:

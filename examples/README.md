@@ -7,6 +7,7 @@ This folder contains a tiny tracked smoke dataset and matching inputs for a repr
 - `manual_annotations/example_manual_annotations.csv`: manual-count references for validation
 - `phenotype_rules/`: example phenotype configs
 - `atlas/atlas_reference.example.csv`: example atlas prior table
+- `models/`: example model-evaluation and Cellpose training manifests
 
 Recommended smoke command:
 

@@ -12,7 +12,9 @@ def build_methods_appendix(
     sample_table: pd.DataFrame | None = None,
     region_table: pd.DataFrame | None = None,
     validation_summary: pd.DataFrame | None = None,
+    study_statistics: dict[str, Any] | None = None,
 ) -> str:
+    model_spec = resolved_config.get("model_spec", {}) if isinstance(resolved_config.get("model_spec"), dict) else {}
     lines: list[str] = []
     lines.append("# Methods Appendix")
     lines.append("")
@@ -37,6 +39,22 @@ def build_methods_appendix(
     lines.append(f"- Atlas reference: `{resolved_config.get('atlas_reference')}`")
     lines.append(f"- Longitudinal tracking: `{resolved_config.get('track_longitudinal')}`")
     lines.append("")
+
+    if model_spec:
+        lines.append("## Model Selection")
+        lines.append("")
+        lines.append(f"- Model label: `{model_spec.get('model_label')}`")
+        lines.append(f"- Model source: `{model_spec.get('source')}`")
+        lines.append(f"- Display label: `{model_spec.get('display_label')}`")
+        lines.append(f"- Backend: `{model_spec.get('backend')}`")
+        lines.append(f"- Built-in model name: `{model_spec.get('builtin_name')}`")
+        lines.append(f"- Asset path: `{model_spec.get('asset_path')}`")
+        lines.append(f"- Trust mode: `{model_spec.get('trust_mode')}`")
+        if model_spec.get("alias"):
+            lines.append(f"- Alias: `{model_spec.get('alias')}`")
+        if model_spec.get("source") == "legacy_custom":
+            lines.append("- Compatibility note: this run used the legacy custom Cellpose path through `--model_type`.")
+        lines.append("")
 
     if sample_table is not None and not sample_table.empty:
         lines.append("## Study Cohort")
@@ -69,6 +87,32 @@ def build_methods_appendix(
         lines.append(f"- RMSE: `{row['rmse']:.3f}`")
         lines.append(f"- Pearson r: `{row['pearson_r']:.3f}`")
         lines.append(f"- ICC(2,1): `{row['icc_2_1']:.3f}`")
+        lines.append("")
+
+    if study_statistics:
+        lines.append("## Statistical Analysis")
+        lines.append("")
+        lines.append(f"- Requested statistics mode: `{study_statistics.get('requested_mode')}`")
+        for key in ("sample_outcome", "region_outcome"):
+            payload = study_statistics.get(key, {})
+            if not payload:
+                continue
+            lines.append(
+                f"- {payload.get('analysis_level', 'analysis').title()} outcome "
+                f"`{payload.get('outcome')}` used `{payload.get('selected_mode')}` mode."
+            )
+            if payload.get("selection_reason"):
+                lines.append(f"  Selection reason: {payload['selection_reason']}")
+            if payload.get("fallback_reason"):
+                lines.append(f"  Fallback reason: {payload['fallback_reason']}")
+            if payload.get("mixed_formula"):
+                lines.append(f"  Mixed-effects formula: `{payload['mixed_formula']}`")
+            if payload.get("grouping_factor"):
+                lines.append(f"  Grouping factor: `{payload['grouping_factor']}`")
+            if payload.get("variance_components"):
+                lines.append(f"  Variance components: `{payload['variance_components']}`")
+            for warning in payload.get("warnings", []):
+                lines.append(f"  Warning: {warning}")
         lines.append("")
 
     lines.append("## Output Policy")

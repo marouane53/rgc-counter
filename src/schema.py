@@ -118,6 +118,13 @@ STUDY_TABLE_COLUMNS = [
     "genotype",
     "timepoint_dpi",
     "modality",
+    "backend",
+    "model_label",
+    "model_source",
+    "model_alias",
+    "model_asset_path",
+    "model_builtin_name",
+    "model_trust_mode",
     "cell_count",
     "density_cells_per_mm2",
 ]

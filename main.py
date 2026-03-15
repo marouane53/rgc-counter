@@ -41,6 +41,7 @@ from src.context import RunContext
 from src.io_ome import load_any_image
 from src.manifest import load_manifest
 from src.measurements import object_table_path_for, write_object_table
+from src.model_registry import model_spec_to_dict, model_summary_fields, model_warning, resolve_model_spec
 from src.modalities import adapt_image_for_modality
 from src.models import build_segmenter
 from src.io_ome import save_labels_to_ome_zarr
@@ -57,7 +58,11 @@ from src.retina_coords import (
     write_retina_frame_json,
 )
 from src.review import resolve_edit_log_path
-from src.stats import compute_outcome_stats, compute_region_stats
+from src.stats import (
+    build_statistics_decision_frame,
+    run_study_statistics,
+    write_study_statistics_artifacts,
+)
 from src.track import build_longitudinal_track_table, summarize_tracks
 from src.uncertainty_io import save_float_map
 from src.validation import (
@@ -112,6 +117,7 @@ def _build_pipeline_cfg(
     args: argparse.Namespace,
     *,
     backend: str,
+    model_spec: dict[str, object],
     use_gpu: bool,
     min_size: int,
     max_size: int,
@@ -132,6 +138,7 @@ def _build_pipeline_cfg(
         "spatial_stats": args.spatial_stats,
         "backend": backend,
         "use_gpu": use_gpu,
+        "model_spec": model_spec,
         "phenotype_engine": args.phenotype_engine,
         "marker_metrics": args.marker_metrics,
         "interaction_metrics": args.interaction_metrics,
@@ -353,6 +360,7 @@ def _resolved_config_dict(
     *,
     diameter: float | None,
     model_type: str,
+    model_spec: dict[str, object],
     min_size: int,
     max_size: int,
     use_gpu: bool,
@@ -362,6 +370,15 @@ def _resolved_config_dict(
     return {
         "diameter": diameter,
         "model_type": model_type,
+        "cellpose_model": args.cellpose_model,
+        "stardist_weights": args.stardist_weights,
+        "model_alias": args.model_alias,
+        "model_label": model_spec.get("model_label"),
+        "model_source": model_spec.get("source"),
+        "model_asset_path": model_spec.get("asset_path"),
+        "model_builtin_name": model_spec.get("builtin_name"),
+        "model_trust_mode": model_spec.get("trust_mode"),
+        "model_spec": model_spec,
         "min_size": min_size,
         "max_size": max_size,
         "use_gpu": use_gpu,
@@ -398,6 +415,7 @@ def _resolved_config_dict(
         "atlas_reference": args.atlas_reference,
         "track_longitudinal": args.track_longitudinal,
         "track_max_disp_px": args.track_max_disp_px,
+        "stats_mode": args.stats_mode,
         "manifest": args.manifest,
         "study_output_dir": args.study_output_dir,
         "calibration_grid": args.calibration_grid,
@@ -564,6 +582,7 @@ def _run_calibration_mode(
     focus_mode: str,
     diameter: float | None,
     model_type: str,
+    model_spec: dict[str, object],
     min_size: int,
     max_size: int,
     use_gpu: bool,
@@ -660,6 +679,7 @@ def _run_calibration_mode(
         args,
         diameter=diameter,
         model_type=model_type,
+        model_spec=model_spec,
         min_size=min_size,
         max_size=max_size,
         use_gpu=use_gpu,
@@ -692,6 +712,7 @@ def _run_study_mode(
     focus_mode: str,
     diameter: float | None,
     model_type: str,
+    model_spec: dict[str, object],
     min_size: int,
     max_size: int,
     backend: str,
@@ -749,14 +770,12 @@ def _run_study_mode(
         )
 
     stats_dir = study_output_dir / "stats"
-    stats_dir.mkdir(parents=True, exist_ok=True)
-    stats_frame = compute_outcome_stats(sample_table, outcome="cell_count")
-    if not stats_frame.empty:
-        stats_frame.to_csv(stats_dir / "study_stats.csv", index=False)
-
-    region_stats = compute_region_stats(region_table, outcome="density_cells_per_mm2") if not region_table.empty else pd.DataFrame()
-    if not region_stats.empty:
-        region_stats.to_csv(stats_dir / "region_stats.csv", index=False)
+    stats_mixed_dir = study_output_dir / "stats_mixed"
+    stats_result = run_study_statistics(sample_table, region_table, requested_mode=args.stats_mode)
+    stats_artifacts = write_study_statistics_artifacts(stats_result, stats_dir=stats_dir, stats_mixed_dir=stats_mixed_dir)
+    stats_frame = stats_result.study_stats
+    region_stats = stats_result.region_stats
+    stats_decision_frame = build_statistics_decision_frame(stats_result.decision)
 
     validation_dir = study_output_dir / "validation"
     validation_table = build_validation_table(sample_table)
@@ -788,6 +807,7 @@ def _run_study_mode(
         args,
         diameter=diameter,
         model_type=model_type,
+        model_spec=model_spec,
         min_size=min_size,
         max_size=max_size,
         use_gpu=use_gpu,
@@ -799,6 +819,7 @@ def _run_study_mode(
         sample_table=sample_table,
         region_table=region_table,
         validation_summary=validation_summary,
+        study_statistics=stats_result.decision,
     )
     methods_path = write_methods_appendix(study_output_dir / "methods_appendix.md", methods_appendix)
 
@@ -807,6 +828,8 @@ def _run_study_mode(
             "manifest": args.manifest,
             "study_output_dir": str(study_output_dir),
             "backend": backend,
+            "model_label": model_spec.get("model_label"),
+            "model_source": model_spec.get("source"),
             "modality": args.modality,
             "diameter": diameter,
             "min_size": min_size,
@@ -814,19 +837,41 @@ def _run_study_mode(
             "gpu": use_gpu,
             "focus_mode": focus_mode,
             "tta": args.tta,
+            "stats_mode": args.stats_mode,
         }
         notes = f"Study mode with {len(sample_table)} samples."
+        if stats_result.decision.get("warnings"):
+            notes += " Statistical warnings were recorded; inspect the decision artifact and provenance."
         extra_tables = []
+        if not stats_decision_frame.empty:
+            extra_tables.append({"title": "Statistics Decision", "html": stats_decision_frame.to_html(index=False)})
+        if not stats_result.design_audit.empty:
+            extra_tables.append({"title": "Study Design Audit", "html": stats_result.design_audit.to_html(index=False)})
         if not stats_frame.empty:
             extra_tables.append({"title": "Study Statistics", "html": stats_frame.to_html(index=False)})
         if not region_stats.empty:
             extra_tables.append({"title": "Region Statistics", "html": region_stats.head(40).to_html(index=False)})
+        if not stats_result.sample_mixed.empty:
+            extra_tables.append({"title": "Sample Mixed Effects", "html": stats_result.sample_mixed.to_html(index=False)})
+        if not stats_result.region_mixed.empty:
+            extra_tables.append({"title": "Region Mixed Effects", "html": stats_result.region_mixed.head(40).to_html(index=False)})
         if not validation_summary.empty:
             extra_tables.append({"title": "Validation Summary", "html": validation_summary.to_html(index=False)})
         if not atlas_summary.empty:
             extra_tables.append({"title": "Atlas Summary", "html": atlas_summary.to_html(index=False)})
         if not track_summary.empty:
             extra_tables.append({"title": "Tracking Summary", "html": track_summary.to_html(index=False)})
+        stats_assets = [
+            ("Statistics decision", os.path.relpath(stats_artifacts["statistics_decision"], study_output_dir)),
+            ("Design audit (Markdown)", os.path.relpath(stats_artifacts["design_audit_md"], study_output_dir)),
+            ("Design audit (CSV)", os.path.relpath(stats_artifacts["design_audit_csv"], study_output_dir)),
+            ("Study statistics", os.path.relpath(stats_artifacts["study_stats"], study_output_dir)),
+            ("Region statistics", os.path.relpath(stats_artifacts["region_stats"], study_output_dir)),
+        ]
+        if "sample_mixed" in stats_artifacts:
+            stats_assets.append(("Sample mixed-effects coefficients", os.path.relpath(stats_artifacts["sample_mixed"], study_output_dir)))
+        if "region_mixed" in stats_artifacts:
+            stats_assets.append(("Region mixed-effects coefficients", os.path.relpath(stats_artifacts["region_mixed"], study_output_dir)))
         report_path = write_html_report(
             str(study_output_dir),
             run_info,
@@ -835,7 +880,7 @@ def _run_study_mode(
             notes=notes,
             tables=extra_tables,
             methods_appendix=methods_appendix,
-            assets=report_assets + [("Methods appendix", os.path.relpath(methods_path, study_output_dir))],
+            assets=report_assets + stats_assets + [("Methods appendix", os.path.relpath(methods_path, study_output_dir))],
         )
         print(f"[INFO] HTML report written to {report_path}")
         for ctx in processed_contexts:
@@ -850,6 +895,8 @@ def _run_study_mode(
             run_started_at=run_started_at,
             run_finished_at=datetime.now(),
             results_csv_path=study_summary_csv,
+            study_statistics=stats_result.decision,
+            model_spec=model_spec,
         )
         provenance_path = write_provenance(study_output_dir / "provenance.json", provenance_payload)
         print(f"[INFO] Provenance written to {provenance_path}")
@@ -865,7 +912,10 @@ def main():
     parser.add_argument("--study_output_dir", type=str, default=None, help="Folder for study-mode outputs")
     parser.add_argument("--manual_annotations", type=str, default=None, help="Optional CSV with sample_id plus manual_count or label_path")
     parser.add_argument("--diameter", type=float, default=None, help="Override config.yaml cell diameter in pixels")
-    parser.add_argument("--model_type", type=str, default=None, help="Cellpose model type: 'cyto', 'nuclei' or custom path")
+    parser.add_argument("--model_type", type=str, default=None, help="Cellpose built-in model type (for example 'cyto' or 'nuclei'); custom paths remain supported here only as a legacy compatibility path")
+    parser.add_argument("--cellpose_model", type=str, default=None, help="Path to a trusted local custom Cellpose model")
+    parser.add_argument("--stardist_weights", type=str, default=None, help="Path to trusted local custom StarDist weights or model directory")
+    parser.add_argument("--model_alias", type=str, default=None, help="Optional human-readable model label stored in provenance and reports")
     parser.add_argument("--min_size", type=int, default=None, help="Override minimum mask area in pixels")
     parser.add_argument("--max_size", type=int, default=None, help="Override maximum mask area in pixels")
 
@@ -915,6 +965,7 @@ def main():
     parser.add_argument("--atlas_reference", type=str, default=None, help="Optional atlas reference CSV for region-wise observed vs expected comparison")
     parser.add_argument("--track_longitudinal", action="store_true", help="Build longitudinal cell tracks across timepoints in study mode")
     parser.add_argument("--track_max_disp_px", type=float, default=20.0, help="Maximum centroid displacement for longitudinal matching")
+    parser.add_argument("--stats_mode", type=str, choices=["auto", "simple", "mixed"], default="auto", help="Study-mode statistics path: auto, simple, or mixed")
 
     # I/O options
     parser.add_argument("--save_ome_zarr", action="store_true", help="Write image + masks as OME-Zarr")
@@ -962,16 +1013,24 @@ def main():
     # Determine focus mode
     focus_mode = _resolve_focus_mode(args)
 
-    # Build segmenter backend
-    backend = args.backend
-    # If not provided on CLI, try to read from config via src.config import; but we passed earlier
-    if backend is None:
-        backend = model_type if model_type in ("cellpose", "stardist", "sam") else "cellpose"
-    segmenter = build_segmenter(backend=backend,
-                                diameter=diameter,
-                                model_type=model_type if backend == "cellpose" else "ignored",
-                                use_gpu=use_gpu,
-                                sam_checkpoint=args.sam_checkpoint)
+    model_spec = resolve_model_spec(
+        backend=args.backend,
+        model_type=model_type,
+        cellpose_model=args.cellpose_model,
+        stardist_weights=args.stardist_weights,
+        sam_checkpoint=args.sam_checkpoint,
+        model_alias=args.model_alias,
+    )
+    backend = model_spec.backend
+    warning = model_warning(model_spec)
+    if warning:
+        print(f"[WARNING] {warning}")
+
+    segmenter = build_segmenter(
+        model_spec=model_spec,
+        diameter=diameter,
+        use_gpu=use_gpu,
+    )
 
     # Prepare outputs
     os.makedirs(args.output_dir, exist_ok=True)
@@ -987,6 +1046,7 @@ def main():
     pipeline_cfg = _build_pipeline_cfg(
         args,
         backend=backend,
+        model_spec=model_spec_to_dict(model_spec),
         use_gpu=use_gpu,
         min_size=min_size,
         max_size=max_size,
@@ -1009,7 +1069,8 @@ def main():
             base_pipeline_cfg=pipeline_cfg,
             focus_mode=focus_mode,
             diameter=diameter,
-            model_type=model_type,
+            model_type=model_spec.model_type or model_type,
+            model_spec=model_spec_to_dict(model_spec),
             min_size=min_size,
             max_size=max_size,
             use_gpu=use_gpu,
@@ -1028,7 +1089,8 @@ def main():
             use_gpu=use_gpu,
             focus_mode=focus_mode,
             diameter=diameter,
-            model_type=model_type,
+            model_type=model_spec.model_type or model_type,
+            model_spec=model_spec_to_dict(model_spec),
             min_size=min_size,
             max_size=max_size,
             backend=backend,
@@ -1108,6 +1170,8 @@ def main():
             "input_dir": args.input_dir,
             "output_dir": args.output_dir,
             "backend": backend,
+            "model_label": model_spec.model_label,
+            "model_source": model_spec.source,
             "modality": args.modality,
             "diameter": diameter,
             "min_size": min_size,
@@ -1138,7 +1202,8 @@ def main():
             resolved_config=_resolved_config_dict(
                 args,
                 diameter=diameter,
-                model_type=model_type,
+                model_type=model_spec.model_type or model_type,
+                model_spec=model_spec_to_dict(model_spec),
                 min_size=min_size,
                 max_size=max_size,
                 use_gpu=use_gpu,
@@ -1149,6 +1214,7 @@ def main():
             run_started_at=run_started_at,
             run_finished_at=datetime.now(),
             results_csv_path=csv_path,
+            model_spec=model_spec_to_dict(model_spec),
         )
         provenance_path = write_provenance(Path(args.output_dir) / "provenance.json", provenance_payload)
         print(f"[INFO] Provenance written to {provenance_path}")

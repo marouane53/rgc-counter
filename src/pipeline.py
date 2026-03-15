@@ -58,6 +58,22 @@ def _resolved_qc_config(cfg: dict[str, Any]) -> dict[str, Any]:
     return dict(cfg.get("qc_config", CONFIG_DATA.get("qc", {})))
 
 
+def _resolved_model_fields(ctx: RunContext, cfg: dict[str, Any]) -> dict[str, Any]:
+    model_fields = {
+        "model_label": ctx.seg_info.get("model_label"),
+        "model_source": ctx.seg_info.get("model_source"),
+        "model_alias": ctx.seg_info.get("model_alias"),
+        "model_asset_path": ctx.seg_info.get("model_asset_path"),
+        "model_builtin_name": ctx.seg_info.get("model_builtin_name"),
+        "model_trust_mode": ctx.seg_info.get("model_trust_mode"),
+    }
+    fallback = cfg.get("model_spec") or {}
+    for key in list(model_fields):
+        if model_fields[key] is None:
+            model_fields[key] = fallback.get(key)
+    return model_fields
+
+
 def _update_measurements_and_summary(ctx: RunContext, cfg: dict[str, Any]) -> None:
     if ctx.labels is None or ctx.qc_mask is None:
         raise ValueError("Measurement refresh requires labels and qc_mask.")
@@ -86,6 +102,9 @@ def _update_measurements_and_summary(ctx: RunContext, cfg: dict[str, Any]) -> No
     ctx.summary_row["density_cells_per_mm2"] = density_cells_per_mm2
     ctx.summary_row["backend"] = ctx.seg_info.get("backend", cfg.get("backend", "unknown"))
     ctx.summary_row["use_gpu"] = cfg.get("use_gpu", False)
+    for key, value in _resolved_model_fields(ctx, cfg).items():
+        ctx.metrics[key] = value
+        ctx.summary_row[key] = value
 
 
 @dataclass
@@ -214,11 +233,16 @@ class SegmentationStage:
         ctx.labels = masks.astype(label_dtype, copy=False)
         ctx.seg_info = seg_info
         ctx.metrics["backend"] = seg_info.get("backend", cfg.get("backend", "unknown"))
+        for key, value in _resolved_model_fields(ctx, cfg).items():
+            if value is not None:
+                ctx.metrics[key] = value
         if cfg.get("tiling"):
             ctx.metrics["tiling"] = {
                 "tile_size": int(cfg.get("tile_size", 1024)),
                 "tile_overlap": int(cfg.get("tile_overlap", 128)),
                 "tile_count": int(seg_info.get("tile_count", 0)),
+                "stitching": seg_info.get("stitching", "unknown"),
+                "matched_overlap_pairs": int(seg_info.get("matched_overlap_pairs", 0)),
             }
         return ctx
 

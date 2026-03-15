@@ -6,6 +6,17 @@ from src.methods import build_methods_appendix
 def test_build_methods_appendix_includes_core_sections():
     resolved = {
         "backend": "cellpose",
+        "model_spec": {
+            "backend": "cellpose",
+            "source": "builtin",
+            "model_label": "cellpose_builtin:cyto",
+            "display_label": "cellpose_builtin:cyto",
+            "builtin_name": "cyto",
+            "asset_path": None,
+            "model_type": "cyto",
+            "alias": None,
+            "trust_mode": "builtin",
+        },
         "focus_mode": "none",
         "use_gpu": False,
         "diameter": None,
@@ -25,5 +36,30 @@ def test_build_methods_appendix_includes_core_sections():
 
     assert "# Methods Appendix" in text
     assert "Pipeline Configuration" in text
+    assert "Model Selection" in text
     assert "Study Cohort" in text
     assert "`v2`" in text
+
+
+def test_build_methods_appendix_includes_statistical_analysis_when_provided():
+    text = build_methods_appendix(
+        resolved_config={"backend": "cellpose", "modality": "flatmount", "modality_projection": "max", "focus_mode": "none", "use_gpu": False, "diameter": None, "min_size": 5, "max_size": 1000, "tta": False, "spatial_stats": False, "phenotype_engine": "legacy", "marker_metrics": False, "interaction_metrics": False, "register_retina": False, "atlas_reference": None, "track_longitudinal": False},
+        study_statistics={
+            "requested_mode": "auto",
+            "sample_outcome": {
+                "analysis_level": "sample",
+                "outcome": "cell_count",
+                "selected_mode": "mixed",
+                "selection_reason": "Detected repeated structure.",
+                "fallback_reason": None,
+                "warnings": [],
+                "mixed_formula": "cell_count ~ C(condition)",
+                "grouping_factor": "animal_id",
+                "variance_components": ["animal_eye"],
+            }
+        },
+    )
+
+    assert "Statistical Analysis" in text
+    assert "Requested statistics mode" in text
+    assert "cell_count" in text

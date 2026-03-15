@@ -1,0 +1,4 @@
+run_id,image_path,label_path,backend,model_type,cellpose_model,stardist_weights,sam_checkpoint,model_alias,diameter,channel_index,notes
+builtin_cyto_a,examples/smoke_data/example_retina_a.tif,examples/models/labels/example_retina_a_labels.tif,cellpose,cyto,,,,builtin-cyto,30,0,Built-in Cellpose baseline on tracked example A
+builtin_nuclei_a,examples/smoke_data/example_retina_a.tif,examples/models/labels/example_retina_a_labels.tif,cellpose,nuclei,,,,builtin-nuclei,30,0,Alternative built-in Cellpose baseline on tracked example A
+builtin_cyto_b,examples/smoke_data/example_retina_b.tif,examples/models/labels/example_retina_b_labels.tif,cellpose,cyto,,,,builtin-cyto,30,0,Built-in Cellpose baseline on tracked example B
