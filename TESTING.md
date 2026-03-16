@@ -17,6 +17,7 @@ Current coverage includes:
 - rigorous spatial inference artifacts
 - model registry, evaluation, and training helpers
 - study statistics and provenance
+- atlas example schema regression
 - napari runtime export
 
 ## Tracked Example Smoke Runs
@@ -89,6 +90,22 @@ Recommended checks for real-data runs:
 
 ## Package Verification
 
+Clone-based install surface checks:
+
+```bash
+python -m pip install -r requirements.txt
+python main.py --help
+```
+
+Optional clone-based overlays:
+
+```bash
+python -m pip install -r requirements-ui.txt
+python -c "import napari; import qtpy"
+python -m pip install -r requirements-stardist.txt
+python -c "from stardist.models import StarDist2D"
+```
+
 Build the package locally:
 
 ```bash
@@ -112,6 +129,29 @@ python -m venv /tmp/retinal-phenotyper-wheel
 /tmp/retinal-phenotyper-wheel/bin/retinal-phenotyper --help
 ```
 
+Packaged install smoke with the tracked example manifest:
+
+```bash
+python -m venv /tmp/retinal-phenotyper-wheel
+/tmp/retinal-phenotyper-wheel/bin/pip install dist/*.whl
+/tmp/retinal-phenotyper-wheel/bin/retinal-phenotyper \
+  --manifest "$PWD/examples/manifests/example_study_manifest.csv" \
+  --study_output_dir /tmp/retinal-phenotyper-wheel-smoke \
+  --focus_none \
+  --register_retina \
+  --region_schema mouse_flatmount_v1 \
+  --spatial_stats --spatial_mode rigorous --spatial_envelope_sims 8 \
+  --write_object_table \
+  --write_provenance \
+  --write_html_report
+```
+
+Verify these packaged-install artifacts:
+- `/tmp/retinal-phenotyper-wheel-smoke/study_summary.csv`
+- `/tmp/retinal-phenotyper-wheel-smoke/study_regions.csv`
+- `/tmp/retinal-phenotyper-wheel-smoke/methods_appendix.md`
+- `/tmp/retinal-phenotyper-wheel-smoke/report.html`
+
 ## Release Verification
 
 TestPyPI-first flow:
@@ -129,6 +169,8 @@ python -m venv /tmp/retinal-phenotyper-testpypi
 /tmp/retinal-phenotyper-testpypi/bin/retinal-phenotyper --version
 /tmp/retinal-phenotyper-testpypi/bin/retinal-phenotyper --help
 ```
+
+Repeat the packaged tracked-example smoke above with the TestPyPI environment before broad release outreach.
 
 Production PyPI release:
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Deprecated legacy wrapper retained for backward reference only.
+# Use `python main.py ...` for CLI runs or `python scripts/run_napari_ui.py` for the local UI.
 # --------------------------------------------------
 #  run_pipeline.sh
 #  Cross-platform shell script for Cell Counting Project

@@ -1,6 +1,8 @@
+from pathlib import Path
+
 import pandas as pd
 
-from src.atlas import compare_region_table_to_atlas, summarize_atlas_comparison
+from src.atlas import compare_region_table_to_atlas, load_atlas_reference, summarize_atlas_comparison
 from src.context import RunContext
 from main import _write_atlas_subtype_outputs
 
@@ -50,6 +52,26 @@ def test_summarize_atlas_comparison_groups_by_condition():
     assert len(summary) == 1
     assert summary.loc[0, "n_regions"] == 2
     assert summary.loc[0, "mean_abs_delta_density_cells_per_mm2"] == 15.0
+
+
+def test_tracked_atlas_examples_match_loader_schema():
+    repo_root = Path(__file__).resolve().parents[1]
+    root_example = repo_root / "atlas_reference.example.csv"
+    canonical_example = repo_root / "examples" / "atlas" / "atlas_reference.example.csv"
+
+    root_frame = load_atlas_reference(root_example)
+    canonical_frame = load_atlas_reference(canonical_example)
+
+    assert list(root_frame.columns) == list(canonical_frame.columns)
+    assert list(root_frame.columns) == [
+        "atlas_name",
+        "retina_region_schema",
+        "region_axis",
+        "region_label",
+        "expected_density_cells_per_mm2",
+        "expected_sd",
+    ]
+    assert canonical_frame.equals(root_frame)
 
 
 def test_write_atlas_subtype_outputs_aggregates_study_tables(tmp_path):

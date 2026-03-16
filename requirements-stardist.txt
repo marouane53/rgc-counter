@@ -1,0 +1,3 @@
+-r requirements.txt
+stardist==0.8.5
+csbdeep==0.7.4

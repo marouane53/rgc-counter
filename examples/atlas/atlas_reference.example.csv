@@ -1,8 +1,8 @@
-retina_region_schema,region_axis,region_label,expected_density
-mouse_flatmount_v1,ring,central,1200
-mouse_flatmount_v1,ring,pericentral,900
-mouse_flatmount_v1,ring,peripheral,700
-mouse_flatmount_v1,quadrant,dorsal_temporal,950
-mouse_flatmount_v1,quadrant,dorsal_nasal,900
-mouse_flatmount_v1,quadrant,ventral_nasal,850
-mouse_flatmount_v1,quadrant,ventral_temporal,900
+atlas_name,retina_region_schema,region_axis,region_label,expected_density_cells_per_mm2,expected_sd
+mouse_demo_v1,mouse_flatmount_v1,ring,central,1150,150
+mouse_demo_v1,mouse_flatmount_v1,ring,pericentral,950,120
+mouse_demo_v1,mouse_flatmount_v1,ring,peripheral,700,100
+mouse_demo_v1,mouse_flatmount_v1,quadrant,dorsal_temporal,950,110
+mouse_demo_v1,mouse_flatmount_v1,quadrant,dorsal_nasal,900,105
+mouse_demo_v1,mouse_flatmount_v1,quadrant,ventral_nasal,850,95
+mouse_demo_v1,mouse_flatmount_v1,quadrant,ventral_temporal,900,105

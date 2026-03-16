@@ -28,6 +28,8 @@ Use this with:
 - `atlas/atlas_subtype_priors.example.yaml`
 - `calibration/calibration_grid.example.yaml`
 
+The canonical public atlas example lives at `atlas/atlas_reference.example.csv`. The repo-root `atlas_reference.example.csv` is kept in sync as a backward-compatible mirror for older paths.
+
 Use these with:
 - [docs/researcher-guide.md](../docs/researcher-guide.md)
 - [TESTING.md](../TESTING.md)

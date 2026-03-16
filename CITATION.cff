@@ -3,7 +3,7 @@ title: retinal-phenotyper
 message: "If you use this software, please cite it using the metadata below."
 type: software
 authors:
-  - family-names: Marouane
+  - family-names: Lamharzi Alaoui
     given-names: Marouane
 repository-code: "https://github.com/marouane53/retinal-phenotyper"
 abstract: "Local-first retinal phenotyping platform for segmentation, registration, spatial inference, validation, calibration, tracking, and study-mode retinal analysis workflows."

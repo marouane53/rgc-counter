@@ -55,10 +55,25 @@ source .venv/bin/activate  # macOS/Linux
 pip install -e .[dev]
 ```
 
-Napari users:
+Preferred editable extras:
 
 ```bash
 pip install -e ".[dev,ui]"
+pip install -e ".[dev,stardist]"
+pip install -e ".[dev,ui,stardist]"
+```
+
+Plain requirements path for clone-based installs:
+
+```bash
+pip install -r requirements.txt
+```
+
+Optional overlays:
+
+```bash
+pip install -r requirements-ui.txt
+pip install -r requirements-stardist.txt
 ```
 
 ### After PyPI publication
@@ -67,13 +82,17 @@ pip install -e ".[dev,ui]"
 pip install retinal-phenotyper
 ```
 
-Napari users:
+Optional extras from the published package:
 
 ```bash
 pip install "retinal-phenotyper[ui]"
+pip install "retinal-phenotyper[stardist]"
+pip install "retinal-phenotyper[ui,stardist]"
 ```
 
 Notes:
+- `requirements.txt` is the core CLI/runtime surface and intentionally excludes the napari UI stack and the StarDist stack.
+- `requirements-ui.txt` and `requirements-stardist.txt` are additive clone-based overlays.
 - Custom checkpoints and weights are trusted local assets only.
 - Do not load untrusted model files.
 - SAM is not pinned as a default dependency path; install its requirements separately if you plan to use that backend.
@@ -158,6 +177,8 @@ python main.py \
 ```
 
 Atlas subtype outputs are explicitly probabilistic priors, not validated subtype truth.
+
+Legacy root launcher scripts from the earlier project era are archived under `scripts/legacy/` and are no longer the recommended entrypoint.
 
 ## Key Capabilities
 

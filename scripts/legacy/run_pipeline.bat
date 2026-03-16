@@ -1,4 +1,6 @@
 @echo off
+REM Deprecated legacy wrapper retained for backward reference only.
+REM Use `python main.py ...` for CLI runs or `python scripts/run_napari_ui.py` for the local UI.
 
 REM --------------------------------------------------
 REM  run_pipeline.bat
