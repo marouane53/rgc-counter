@@ -1144,9 +1144,9 @@ def _run_study_mode(
 
 def main():
     run_started_at = datetime.now()
-    parser = argparse.ArgumentParser(description="Automated RGC Counting Suite")
+    parser = argparse.ArgumentParser(description="retinal-phenotyper: local-first retinal image analysis platform")
     try:
-        package_version = metadata.version("rgc-counter")
+        package_version = metadata.version("retinal-phenotyper")
     except metadata.PackageNotFoundError:
         package_version = "1.0.0"
 

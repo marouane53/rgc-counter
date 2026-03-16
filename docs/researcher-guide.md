@@ -1,6 +1,6 @@
 # Researcher Guide
 
-This is the main task-driven entrypoint for using RGC Counter as a researcher.
+This is the main task-driven entrypoint for using retinal-phenotyper as a researcher.
 
 ## I have single-image flat-mount TIFFs
 

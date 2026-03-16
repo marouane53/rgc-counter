@@ -106,17 +106,17 @@ python main.py --version
 Wheel install smoke in a clean virtualenv:
 
 ```bash
-python -m venv /tmp/rgc-counter-wheel
-/tmp/rgc-counter-wheel/bin/pip install dist/*.whl
-/tmp/rgc-counter-wheel/bin/rgc-counter --version
-/tmp/rgc-counter-wheel/bin/rgc-counter --help
+python -m venv /tmp/retinal-phenotyper-wheel
+/tmp/retinal-phenotyper-wheel/bin/pip install dist/*.whl
+/tmp/retinal-phenotyper-wheel/bin/retinal-phenotyper --version
+/tmp/retinal-phenotyper-wheel/bin/retinal-phenotyper --help
 ```
 
 ## Release Verification
 
 TestPyPI-first flow:
 
-1. Reserve `rgc-counter` on TestPyPI and PyPI.
+1. Reserve `retinal-phenotyper` on TestPyPI and PyPI.
 2. Configure GitHub Trusted Publishing for both services.
 3. Trigger `.github/workflows/publish-testpypi.yml`.
 4. Verify a clean install from TestPyPI.
@@ -124,10 +124,10 @@ TestPyPI-first flow:
 Example TestPyPI install:
 
 ```bash
-python -m venv /tmp/rgc-counter-testpypi
-/tmp/rgc-counter-testpypi/bin/pip install -i https://test.pypi.org/simple/ rgc-counter
-/tmp/rgc-counter-testpypi/bin/rgc-counter --version
-/tmp/rgc-counter-testpypi/bin/rgc-counter --help
+python -m venv /tmp/retinal-phenotyper-testpypi
+/tmp/retinal-phenotyper-testpypi/bin/pip install -i https://test.pypi.org/simple/ retinal-phenotyper
+/tmp/retinal-phenotyper-testpypi/bin/retinal-phenotyper --version
+/tmp/retinal-phenotyper-testpypi/bin/retinal-phenotyper --help
 ```
 
 Production PyPI release:
@@ -137,8 +137,8 @@ Production PyPI release:
 3. Verify a clean install from PyPI.
 
 ```bash
-python -m venv /tmp/rgc-counter-pypi
-/tmp/rgc-counter-pypi/bin/pip install rgc-counter
-/tmp/rgc-counter-pypi/bin/rgc-counter --version
-/tmp/rgc-counter-pypi/bin/rgc-counter --help
+python -m venv /tmp/retinal-phenotyper-pypi
+/tmp/retinal-phenotyper-pypi/bin/pip install retinal-phenotyper
+/tmp/retinal-phenotyper-pypi/bin/retinal-phenotyper --version
+/tmp/retinal-phenotyper-pypi/bin/retinal-phenotyper --help
 ```

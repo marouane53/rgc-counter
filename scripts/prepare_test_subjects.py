@@ -377,7 +377,7 @@ def generate_synthetic_subjects(output_dir: Path) -> None:
         synthetic_dir / "README.txt",
         textwrap.dedent(
             f"""\
-            Synthetic test subjects for local RGC Counter development.
+            Synthetic test subjects for local retinal-phenotyper development.
 
             Contents:
             - simple_counting/: single-channel counting smoke test
@@ -482,7 +482,7 @@ def list_datasets() -> None:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Prepare ignored local test subjects for RGC Counter.")
+    parser = argparse.ArgumentParser(description="Prepare ignored local test subjects for retinal-phenotyper.")
     parser.add_argument(
         "target",
         choices=["list", "synthetic", "oir_sample", *PUBLIC_DATASETS.keys()],

@@ -36,7 +36,7 @@ class RGCCounterDockWidget(QWidget):
         self._last_runtime = None
         self._pending_edits: list[dict[str, object]] = []
 
-        self.setWindowTitle("RGC Counter")
+        self.setWindowTitle("retinal-phenotyper")
         self._build_ui()
         self._bind_viewer_events()
         self.refresh_layer_choices()

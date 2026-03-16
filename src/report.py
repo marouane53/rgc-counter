@@ -14,7 +14,7 @@ _HTML_TEMPLATE = """
 <html>
 <head>
 <meta charset="utf-8">
-<title>RGC Counter Report</title>
+<title>retinal-phenotyper Report</title>
 <style>
 body { font-family: Arial, sans-serif; margin: 24px; }
 h1 { margin-bottom: 0; }
@@ -28,7 +28,7 @@ ul { padding-left: 18px; }
 </style>
 </head>
 <body>
-<h1>RGC Counter Report</h1>
+<h1>retinal-phenotyper Report</h1>
 <small>Generated at {{ timestamp }}</small>
 
 <h2>Run info</h2>

@@ -1,12 +1,12 @@
 cff-version: 1.2.0
-title: RGC Counter
+title: retinal-phenotyper
 message: "If you use this software, please cite it using the metadata below."
 type: software
 authors:
   - family-names: Marouane
     given-names: Marouane
-repository-code: "https://github.com/marouane53/rgc-counter"
-abstract: "Local-first retinal spatial phenotyping suite for RGC analysis with study mode, retina registration, validation, review sidecars, uncertainty persistence, tiled inference, and a napari workflow."
+repository-code: "https://github.com/marouane53/retinal-phenotyper"
+abstract: "Local-first retinal phenotyping platform for segmentation, registration, spatial inference, validation, calibration, tracking, and study-mode retinal analysis workflows."
 license: MIT
 version: 1.0.0
 date-released: 2026-03-15

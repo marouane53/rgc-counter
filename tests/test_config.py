@@ -7,7 +7,7 @@ def test_load_config_falls_back_to_builtin_defaults(monkeypatch):
     monkeypatch.setattr(
         config,
         "candidate_config_paths",
-        lambda: [Path("/definitely/missing/rgc-counter-config.yaml")],
+        lambda: [Path("/definitely/missing/retinal-phenotyper-config.yaml")],
     )
 
     loaded, resolved = config.load_config()

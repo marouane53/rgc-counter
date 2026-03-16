@@ -61,7 +61,7 @@ def _deep_update(base: dict[str, Any], updates: dict[str, Any]) -> dict[str, Any
 
 
 def candidate_config_paths() -> list[Path]:
-    env_path = os.environ.get("RGC_COUNTER_CONFIG")
+    env_path = os.environ.get("RETINAL_PHENOTYPER_CONFIG") or os.environ.get("RGC_COUNTER_CONFIG")
     module_dir = Path(__file__).resolve().parent
 
     candidates: list[Path] = []

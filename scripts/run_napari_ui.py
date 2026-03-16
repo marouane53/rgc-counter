@@ -6,9 +6,9 @@ from src.ui_napari import RGCCounterDockWidget
 
 
 def main() -> None:
-    viewer = napari.Viewer(title="RGC Counter")
+    viewer = napari.Viewer(title="retinal-phenotyper")
     widget = RGCCounterDockWidget(viewer)
-    viewer.window.add_dock_widget(widget, area="right", name="RGC Counter")
+    viewer.window.add_dock_widget(widget, area="right", name="retinal-phenotyper")
     napari.run()
 
 

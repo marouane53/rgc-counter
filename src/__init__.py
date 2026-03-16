@@ -1,1 +1,1 @@
-"""RGC Counter package."""
+"""retinal-phenotyper package."""

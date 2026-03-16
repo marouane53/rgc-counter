@@ -1,6 +1,6 @@
 # Stats Designs
 
-RGC Counter now has two study-mode statistics paths: simple tests and mixed-effects models.
+retinal-phenotyper now has two study-mode statistics paths: simple tests and mixed-effects models.
 
 ## When Simple Tests Are Used
 

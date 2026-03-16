@@ -61,7 +61,7 @@ def default_cellpose_trainer(
     from cellpose import models, train
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    model_name = f"rgc_counter_{pretrained_model}"
+    model_name = f"retinal_phenotyper_{pretrained_model}"
     model = models.CellposeModel(gpu=use_gpu, model_type=pretrained_model)
     filename, train_losses, test_losses = train.train_seg(
         model.net,

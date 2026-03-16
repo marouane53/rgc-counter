@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "rgc-counter"
+name = "retinal-phenotyper"
 version = "1.0.0"
-description = "Local-first retinal spatial phenotyping suite for RGC analysis"
+description = "Local-first retinal phenotyping platform for segmentation, registration, spatial analysis, and study workflows"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -46,7 +46,7 @@ dev = [
 ]
 
 [project.scripts]
-rgc-counter = "main:main"
+retinal-phenotyper = "main:main"
 
 [tool.setuptools]
 py-modules = ["main"]

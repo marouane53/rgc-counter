@@ -18,7 +18,7 @@ jobs:
       - run: python -m build
       - run: python -m twine check dist/*
       - run: python main.py --version
-      - run: python -m venv /tmp/rgc-counter-wheel
-      - run: /tmp/rgc-counter-wheel/bin/pip install dist/*.whl
-      - run: /tmp/rgc-counter-wheel/bin/rgc-counter --version
-      - run: /tmp/rgc-counter-wheel/bin/rgc-counter --help
+      - run: python -m venv /tmp/retinal-phenotyper-wheel
+      - run: /tmp/retinal-phenotyper-wheel/bin/pip install dist/*.whl
+      - run: /tmp/retinal-phenotyper-wheel/bin/retinal-phenotyper --version
+      - run: /tmp/retinal-phenotyper-wheel/bin/retinal-phenotyper --help

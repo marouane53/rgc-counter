@@ -7,6 +7,9 @@ from tifffile import imread
 from src.tiling import segment_tiled
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class ConnectedComponentSegmenter:
     def segment(self, image: np.ndarray):
         labels, _ = connected_components(image > 0)
@@ -75,7 +78,7 @@ def test_segment_tiled_preserves_tta_foreground_probability_map():
 
 
 def test_segment_tiled_matches_full_frame_count_on_tracked_smoke_fixture():
-    image = imread(Path("/Users/marouane/Documents/code/rgc-counter/examples/smoke_data/example_retina_a.tif"))
+    image = imread(ROOT / "examples" / "smoke_data" / "example_retina_a.tif")
     segmenter = ConnectedComponentSegmenter()
 
     full_frame_labels, _ = segmenter.segment((image > 100).astype(np.uint8))
