@@ -4,7 +4,7 @@ scipy==1.11.4
 matplotlib==3.8.2
 opencv-python==4.8.1.78
 pyyaml==6.0.1
-tifffile==2023.12.9
+tifffile==2023.2.28
 
 # PyTorch and friends
 # Use CPU builds by default for cross-platform compatibility.
@@ -21,7 +21,7 @@ pyqt5==5.15.9
 # I/O and NGFF
 aicsimageio==4.14.0
 ome-zarr==0.8.3
-zarr==2.16.1
+zarr==2.15.0
 
 # Spatial + stats
 scikit-image==0.22.0

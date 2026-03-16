@@ -8,5 +8,5 @@ authors:
 repository-code: "https://github.com/marouane53/rgc-counter"
 abstract: "Local-first retinal spatial phenotyping suite for RGC analysis with study mode, retina registration, validation, review sidecars, uncertainty persistence, tiled inference, and a napari workflow."
 license: MIT
-version: 0.6.0
-date-released: 2026-03-14
+version: 1.0.0
+date-released: 2026-03-15

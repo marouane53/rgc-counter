@@ -29,6 +29,10 @@ def build_methods_appendix(
     lines.append(f"- Size filter: min `{resolved_config.get('min_size')}`, max `{resolved_config.get('max_size')}`")
     lines.append(f"- TTA enabled: `{resolved_config.get('tta')}`")
     lines.append(f"- Spatial stats enabled: `{resolved_config.get('spatial_stats')}`")
+    if resolved_config.get("spatial_stats"):
+        lines.append(f"- Spatial mode: `{resolved_config.get('spatial_mode', 'legacy')}`")
+        lines.append(f"- Spatial envelope simulations: `{resolved_config.get('spatial_envelope_sims')}`")
+        lines.append(f"- Spatial random seed: `{resolved_config.get('spatial_random_seed')}`")
     lines.append(f"- Phenotype engine: `{resolved_config.get('phenotype_engine')}`")
     lines.append(f"- Marker metrics: `{resolved_config.get('marker_metrics')}`")
     lines.append(f"- Interaction metrics: `{resolved_config.get('interaction_metrics')}`")
@@ -87,6 +91,23 @@ def build_methods_appendix(
         lines.append(f"- RMSE: `{row['rmse']:.3f}`")
         lines.append(f"- Pearson r: `{row['pearson_r']:.3f}`")
         lines.append(f"- ICC(2,1): `{row['icc_2_1']:.3f}`")
+        lines.append("")
+
+    if resolved_config.get("spatial_stats"):
+        lines.append("## Spatial Analysis")
+        lines.append("")
+        mode = resolved_config.get("spatial_mode", "legacy")
+        if mode == "rigorous":
+            lines.append("- Rigorous spatial inference was enabled.")
+            lines.append("- Exact Voronoi polygons were clipped to the true tissue/registered domain geometry.")
+            lines.append("- Ripley `L(r)` was estimated with border correction using domain-distance eligibility.")
+            lines.append("- Pair-correlation `g(r)` was estimated from annulus counts under the same border-correction rule.")
+            lines.append(
+                f"- CSR envelopes used `{resolved_config.get('spatial_envelope_sims', 999)}` simulations "
+                f"with base seed `{resolved_config.get('spatial_random_seed', 1337)}`."
+            )
+        else:
+            lines.append("- Legacy descriptive spatial metrics were reported (NNRI, VDRI, and simple Ripley K).")
         lines.append("")
 
     if study_statistics:

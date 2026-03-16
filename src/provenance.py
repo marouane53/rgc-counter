@@ -73,6 +73,7 @@ def build_run_provenance(
     results_csv_path: str | Path,
     study_statistics: dict[str, Any] | None = None,
     model_spec: dict[str, Any] | None = None,
+    spatial_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "provenance_version": PROVENANCE_VERSION,
@@ -88,6 +89,8 @@ def build_run_provenance(
         payload["study_statistics"] = study_statistics
     if model_spec is not None:
         payload["model_spec"] = model_spec
+    if spatial_analysis is not None:
+        payload["spatial_analysis"] = spatial_analysis
     return payload
 
 

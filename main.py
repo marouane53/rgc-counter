@@ -7,6 +7,7 @@ import copy
 import json
 import os
 from datetime import datetime
+from importlib import metadata
 from pathlib import Path
 
 import pandas as pd
@@ -58,6 +59,16 @@ from src.retina_coords import (
     write_retina_frame_json,
 )
 from src.review import resolve_edit_log_path
+from src.spatial import (
+    pair_correlation_plot_output_path,
+    ripley_l_plot_output_path,
+    save_pair_correlation_plot,
+    save_ripley_l_plot,
+    spatial_curves_output_path,
+    spatial_summary_output_path,
+    write_spatial_curves,
+    write_spatial_summary,
+)
 from src.stats import (
     build_statistics_decision_frame,
     run_study_statistics,
@@ -136,6 +147,9 @@ def _build_pipeline_cfg(
         "max_size": max_size,
         "qc_config": copy.deepcopy(CONFIG_DATA.get("qc", {})),
         "spatial_stats": args.spatial_stats,
+        "spatial_mode": args.spatial_mode,
+        "spatial_envelope_sims": args.spatial_envelope_sims,
+        "spatial_random_seed": args.spatial_random_seed,
         "backend": backend,
         "use_gpu": use_gpu,
         "model_spec": model_spec,
@@ -193,6 +207,22 @@ def _build_sample_cfg(
     return sample_cfg
 
 
+def _spatial_analysis_payload(args: argparse.Namespace, contexts: list[RunContext]) -> dict[str, object] | None:
+    if not args.spatial_stats:
+        return None
+    for ctx in contexts:
+        rigorous = ctx.state.get("rigorous_spatial")
+        if isinstance(rigorous, dict) and isinstance(rigorous.get("spatial_analysis"), dict):
+            return rigorous["spatial_analysis"]
+    return {
+        "mode": args.spatial_mode,
+        "radii_px": [25.0, 50.0, 75.0, 100.0, 150.0, 200.0],
+        "simulation_count": int(args.spatial_envelope_sims),
+        "random_seed": int(args.spatial_random_seed),
+        "regionwise_analysis_run": False,
+    }
+
+
 def _run_pipeline_context(
     *,
     filepath: str | Path,
@@ -216,6 +246,7 @@ def _write_context_artifacts(
     focus_mode: str,
     saved_images_for_report: list[tuple[str, str]],
     report_assets: list[tuple[str, str]],
+    report_tables: list[dict[str, str]],
 ) -> None:
     output_dir = str(output_dir)
     report_root = str(report_root)
@@ -270,6 +301,33 @@ def _write_context_artifacts(
         preview = _save_map_preview(ctx.state["focus_score_map"], preview_path)
         ctx.artifacts["focus_score_map_preview"] = preview
         saved_images_for_report.append((f"Focus score preview {os.path.basename(filepath)}", os.path.relpath(preview, report_root)))
+
+    if "rigorous_spatial" in ctx.state:
+        rigorous = ctx.state["rigorous_spatial"]
+        summary = rigorous.get("summary")
+        curves = rigorous.get("curves")
+        if summary is not None and not summary.empty:
+            summary_path = write_spatial_summary(summary, spatial_summary_output_path(output_dir, filepath))
+            ctx.artifacts["spatial_summary"] = summary_path
+            report_assets.append((f"Rigorous spatial summary {os.path.basename(filepath)}", os.path.relpath(summary_path, report_root)))
+            global_summary = summary[summary["analysis_level"] == "global"]
+            if not global_summary.empty:
+                report_tables.append({"title": f"Spatial Analysis (Global) {os.path.basename(filepath)}", "html": global_summary.to_html(index=False)})
+            region_summary = summary[summary["analysis_level"] == "region"]
+            if not region_summary.empty:
+                report_tables.append({"title": f"Spatial Analysis (Regions) {os.path.basename(filepath)}", "html": region_summary.head(24).to_html(index=False)})
+        if curves is not None and not curves.empty:
+            curves_path = write_spatial_curves(curves, spatial_curves_output_path(output_dir, filepath))
+            ctx.artifacts["spatial_curves"] = curves_path
+            report_assets.append((f"Rigorous spatial curves {os.path.basename(filepath)}", os.path.relpath(curves_path, report_root)))
+            global_curves = curves[curves["analysis_level"] == "global"]
+            if not global_curves.empty:
+                l_plot = save_ripley_l_plot(global_curves, ripley_l_plot_output_path(output_dir, filepath))
+                g_plot = save_pair_correlation_plot(global_curves, pair_correlation_plot_output_path(output_dir, filepath))
+                ctx.artifacts["ripley_l_global_plot"] = l_plot
+                ctx.artifacts["pair_correlation_global_plot"] = g_plot
+                saved_images_for_report.append((f"Ripley L {os.path.basename(filepath)}", os.path.relpath(l_plot, report_root)))
+                saved_images_for_report.append((f"Pair correlation g {os.path.basename(filepath)}", os.path.relpath(g_plot, report_root)))
 
     if args.save_ome_zarr and ctx.gray is not None and ctx.labels is not None:
         zarr_dir = os.path.join(output_dir, _output_stem(filepath) + ".zarr")
@@ -333,6 +391,7 @@ def _process_single_image(
     focus_mode: str,
     saved_images_for_report: list[tuple[str, str]],
     report_assets: list[tuple[str, str]],
+    report_tables: list[dict[str, str]],
 ) -> RunContext:
     ctx = _run_pipeline_context(
         filepath=filepath,
@@ -351,6 +410,7 @@ def _process_single_image(
         focus_mode=focus_mode,
         saved_images_for_report=saved_images_for_report,
         report_assets=report_assets,
+        report_tables=report_tables,
     )
     return ctx
 
@@ -393,6 +453,9 @@ def _resolved_config_dict(
         "write_qc_maps": args.write_qc_maps,
         "strict_schemas": args.strict_schemas,
         "spatial_stats": args.spatial_stats,
+        "spatial_mode": args.spatial_mode,
+        "spatial_envelope_sims": args.spatial_envelope_sims,
+        "spatial_random_seed": args.spatial_random_seed,
         "tta": args.tta,
         "tiling": args.tiling,
         "tile_size": args.tile_size,
@@ -498,10 +561,11 @@ def _run_manifest_contexts(
     focus_mode: str,
     output_root: Path | None,
     write_artifacts: bool,
-) -> tuple[list[RunContext], list[tuple[str, str]], list[tuple[str, str]]]:
+) -> tuple[list[RunContext], list[tuple[str, str]], list[tuple[str, str]], list[dict[str, str]]]:
     processed_contexts: list[RunContext] = []
     saved_images_for_report: list[tuple[str, str]] = []
     report_assets: list[tuple[str, str]] = []
+    report_tables: list[dict[str, str]] = []
 
     for idx, row in enumerate(manifest_df.to_dict("records"), start=1):
         sample_id = str(row["sample_id"])
@@ -534,6 +598,7 @@ def _run_manifest_contexts(
                 focus_mode=focus_mode,
                 saved_images_for_report=saved_images_for_report,
                 report_assets=report_assets,
+                report_tables=report_tables,
             )
         else:
             ctx = _run_pipeline_context(
@@ -553,7 +618,7 @@ def _run_manifest_contexts(
             f"Density: {ctx.metrics['density_cells_per_mm2']:.2f} cells/mm^2"
         )
 
-    return processed_contexts, saved_images_for_report, report_assets
+    return processed_contexts, saved_images_for_report, report_assets, report_tables
 
 
 def _normalized_calibration_params(
@@ -604,7 +669,7 @@ def _run_calibration_mode(
         print(f"[INFO] [CALIBRATION] ({index}/{len(calibration_spec['grid'])}) {params}")
         normalized = _normalized_calibration_params(params, phenotype_engine=args.phenotype_engine)
         candidate_cfg = apply_dotted_overrides(base_pipeline_cfg, normalized)
-        contexts, _, _ = _run_manifest_contexts(
+        contexts, _, _, _ = _run_manifest_contexts(
             args=args,
             manifest_df=manifest_df,
             pipeline=pipeline,
@@ -643,7 +708,7 @@ def _run_calibration_mode(
 
     normalized_best = _normalized_calibration_params(best_params, phenotype_engine=args.phenotype_engine)
     best_cfg = apply_dotted_overrides(base_pipeline_cfg, normalized_best)
-    contexts, _, _ = _run_manifest_contexts(
+    contexts, _, _, _ = _run_manifest_contexts(
         args=args,
         manifest_df=manifest_df,
         pipeline=pipeline,
@@ -722,7 +787,7 @@ def _run_study_mode(
     study_output_dir.mkdir(parents=True, exist_ok=True)
     print(f"\n[INFO] Processing study manifest with {len(manifest_df)} sample(s) from {args.manifest}")
 
-    processed_contexts, saved_images_for_report, report_assets = _run_manifest_contexts(
+    processed_contexts, saved_images_for_report, report_assets, manifest_report_tables = _run_manifest_contexts(
         args=args,
         manifest_df=manifest_df,
         pipeline=pipeline,
@@ -837,12 +902,14 @@ def _run_study_mode(
             "gpu": use_gpu,
             "focus_mode": focus_mode,
             "tta": args.tta,
+            "spatial_mode": args.spatial_mode if args.spatial_stats else "off",
             "stats_mode": args.stats_mode,
         }
         notes = f"Study mode with {len(sample_table)} samples."
         if stats_result.decision.get("warnings"):
             notes += " Statistical warnings were recorded; inspect the decision artifact and provenance."
         extra_tables = []
+        extra_tables.extend(manifest_report_tables)
         if not stats_decision_frame.empty:
             extra_tables.append({"title": "Statistics Decision", "html": stats_decision_frame.to_html(index=False)})
         if not stats_result.design_audit.empty:
@@ -897,6 +964,7 @@ def _run_study_mode(
             results_csv_path=study_summary_csv,
             study_statistics=stats_result.decision,
             model_spec=model_spec,
+            spatial_analysis=_spatial_analysis_payload(args, processed_contexts),
         )
         provenance_path = write_provenance(study_output_dir / "provenance.json", provenance_payload)
         print(f"[INFO] Provenance written to {provenance_path}")
@@ -905,6 +973,12 @@ def _run_study_mode(
 def main():
     run_started_at = datetime.now()
     parser = argparse.ArgumentParser(description="Automated RGC Counting Suite")
+    try:
+        package_version = metadata.version("rgc-counter")
+    except metadata.PackageNotFoundError:
+        package_version = "1.0.0"
+
+    parser.add_argument("--version", action="version", version=f"%(prog)s {package_version}")
 
     parser.add_argument("--input_dir", type=str, default="input", help="Folder containing images")
     parser.add_argument("--output_dir", type=str, default="Outputs", help="Folder for outputs")
@@ -953,6 +1027,9 @@ def main():
 
     # Spatial statistics
     parser.add_argument("--spatial_stats", action="store_true", help="Compute spatial mosaic metrics")
+    parser.add_argument("--spatial_mode", type=str, choices=["legacy", "rigorous"], default="legacy", help="Spatial analysis mode when --spatial_stats is enabled")
+    parser.add_argument("--spatial_envelope_sims", type=int, default=999, help="Number of CSR simulations for rigorous spatial envelopes")
+    parser.add_argument("--spatial_random_seed", type=int, default=1337, help="Base random seed for rigorous spatial envelopes")
 
     # Retina registration
     parser.add_argument("--register_retina", action="store_true", help="Register cells into an ONH-centered retina coordinate frame")
@@ -1110,6 +1187,7 @@ def main():
     rows = []
     saved_images_for_report = []
     report_assets: list[tuple[str, str]] = []
+    report_tables: list[dict[str, str]] = []
     processed_contexts = []
 
     for idx, (filepath, img, meta) in enumerate(image_list, start=1):
@@ -1129,6 +1207,7 @@ def main():
             focus_mode=focus_mode,
             saved_images_for_report=saved_images_for_report,
             report_assets=report_assets,
+            report_tables=report_tables,
         )
         ctx.metrics["modality"] = modality
         ctx.summary_row["modality"] = modality
@@ -1179,8 +1258,10 @@ def main():
             "gpu": use_gpu,
             "focus_mode": focus_mode,
             "tta": args.tta,
+            "spatial_mode": args.spatial_mode if args.spatial_stats else "off",
         }
         extra_tables = []
+        extra_tables.extend(report_tables)
         if not atlas_summary.empty:
             extra_tables.append({"title": "Atlas Summary", "html": atlas_summary.to_html(index=False)})
         report_path = write_html_report(
@@ -1215,6 +1296,7 @@ def main():
             run_finished_at=datetime.now(),
             results_csv_path=csv_path,
             model_spec=model_spec_to_dict(model_spec),
+            spatial_analysis=_spatial_analysis_payload(args, processed_contexts),
         )
         provenance_path = write_provenance(Path(args.output_dir) / "provenance.json", provenance_payload)
         print(f"[INFO] Provenance written to {provenance_path}")

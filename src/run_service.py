@@ -41,6 +41,16 @@ from src.retina_coords import (
 from src.review import resolve_edit_log_path
 from src.uncertainty_io import save_float_map
 from src.visualize import apply_out_of_focus_overlay, create_debug_overlay, save_debug_image
+from src.spatial import (
+    pair_correlation_plot_output_path,
+    ripley_l_plot_output_path,
+    save_pair_correlation_plot,
+    save_ripley_l_plot,
+    spatial_curves_output_path,
+    spatial_summary_output_path,
+    write_spatial_curves,
+    write_spatial_summary,
+)
 
 
 BBoxSelector = Callable[[np.ndarray], tuple[int, int, int, int]]
@@ -72,6 +82,9 @@ class RuntimeOptions:
     tta: bool = False
     tta_transforms: list[str] | None = None
     spatial_stats: bool = False
+    spatial_mode: str = "legacy"
+    spatial_envelope_sims: int = 999
+    spatial_random_seed: int = 1337
     register_retina: bool = False
     region_schema: str = "mouse_flatmount_v1"
     onh_mode: str = "cli"
@@ -140,6 +153,9 @@ def _resolved_config(runtime: AppRuntime) -> dict[str, Any]:
         "tta": options.tta,
         "tta_transforms": options.tta_transforms,
         "spatial_stats": options.spatial_stats,
+        "spatial_mode": options.spatial_mode,
+        "spatial_envelope_sims": options.spatial_envelope_sims,
+        "spatial_random_seed": options.spatial_random_seed,
         "phenotype_engine": options.phenotype_engine,
         "marker_metrics": options.marker_metrics,
         "interaction_metrics": options.interaction_metrics,
@@ -221,6 +237,9 @@ def build_runtime(
         "max_size": max_size,
         "qc_config": copy.deepcopy(CONFIG_DATA.get("qc", {})),
         "spatial_stats": options.spatial_stats,
+        "spatial_mode": options.spatial_mode,
+        "spatial_envelope_sims": options.spatial_envelope_sims,
+        "spatial_random_seed": options.spatial_random_seed,
         "backend": backend,
         "use_gpu": use_gpu,
         "model_spec": model_summary_fields(model_spec),
@@ -355,6 +374,7 @@ def export_context(
     output_dir.mkdir(parents=True, exist_ok=True)
     saved_images_for_report: list[tuple[str, str]] = []
     report_assets: list[tuple[str, str]] = []
+    report_tables: list[dict[str, str]] = []
 
     csv_path = output_dir / "results.csv"
     utils.save_results_to_csv([dict(ctx.summary_row)], str(csv_path))
@@ -418,6 +438,34 @@ def export_context(
         ctx.artifacts["focus_score_map_preview"] = preview
         saved_images_for_report.append(("Focus score preview", str(preview.relative_to(output_dir))))
 
+    if "rigorous_spatial" in ctx.state:
+        rigorous = ctx.state["rigorous_spatial"]
+        summary = rigorous.get("summary", None)
+        curves = rigorous.get("curves", None)
+        if summary is not None and not summary.empty:
+            summary_path = write_spatial_summary(summary, spatial_summary_output_path(output_dir, ctx.path))
+            ctx.artifacts["spatial_summary"] = summary_path
+            report_assets.append(("Rigorous spatial summary", str(summary_path.relative_to(output_dir))))
+            report_tables.append({"title": "Spatial Analysis", "html": summary.to_html(index=False)})
+            global_summary = summary[summary["analysis_level"] == "global"]
+            if not global_summary.empty:
+                report_tables.append({"title": "Spatial Analysis (Global)", "html": global_summary.to_html(index=False)})
+            region_summary = summary[summary["analysis_level"] == "region"]
+            if not region_summary.empty:
+                report_tables.append({"title": "Spatial Analysis (Regions)", "html": region_summary.head(24).to_html(index=False)})
+        if curves is not None and not curves.empty:
+            curves_path = write_spatial_curves(curves, spatial_curves_output_path(output_dir, ctx.path))
+            ctx.artifacts["spatial_curves"] = curves_path
+            report_assets.append(("Rigorous spatial curves", str(curves_path.relative_to(output_dir))))
+            global_curves = curves[curves["analysis_level"] == "global"]
+            if not global_curves.empty:
+                l_plot = save_ripley_l_plot(global_curves, ripley_l_plot_output_path(output_dir, ctx.path))
+                g_plot = save_pair_correlation_plot(global_curves, pair_correlation_plot_output_path(output_dir, ctx.path))
+                ctx.artifacts["ripley_l_global_plot"] = l_plot
+                ctx.artifacts["pair_correlation_global_plot"] = g_plot
+                saved_images_for_report.append(("Ripley L (global)", str(l_plot.relative_to(output_dir))))
+                saved_images_for_report.append(("Pair correlation g (global)", str(g_plot.relative_to(output_dir))))
+
     if runtime.options.register_retina and "retina_frame" in ctx.state:
         frame_path = write_retina_frame_json(ctx.state["retina_frame"], retina_frame_output_path(output_dir, ctx.path))
         ctx.artifacts["retina_frame"] = frame_path
@@ -464,11 +512,13 @@ def export_context(
                 "gpu": runtime.use_gpu,
                 "focus_mode": runtime.options.focus_mode,
                 "tta": runtime.options.tta,
+                "spatial_mode": runtime.options.spatial_mode if runtime.options.spatial_stats else "off",
             },
             [dict(ctx.summary_row)],
             images=saved_images_for_report,
             notes="Exported from the napari dock widget.",
             assets=report_assets,
+            tables=report_tables,
         )
         ctx.artifacts["html_report"] = Path(report_path)
 
@@ -483,6 +533,7 @@ def export_context(
                 run_finished_at=datetime.now(),
                 results_csv_path=csv_path,
                 model_spec=model_spec_to_dict(runtime.model_spec),
+                spatial_analysis=ctx.state.get("rigorous_spatial", {}).get("spatial_analysis"),
             ),
         )
         ctx.artifacts["provenance"] = provenance_path

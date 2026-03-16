@@ -63,3 +63,33 @@ def test_build_methods_appendix_includes_statistical_analysis_when_provided():
     assert "Statistical Analysis" in text
     assert "Requested statistics mode" in text
     assert "cell_count" in text
+
+
+def test_build_methods_appendix_describes_rigorous_spatial_analysis():
+    text = build_methods_appendix(
+        resolved_config={
+            "backend": "cellpose",
+            "modality": "flatmount",
+            "modality_projection": "max",
+            "focus_mode": "none",
+            "use_gpu": False,
+            "diameter": None,
+            "min_size": 5,
+            "max_size": 1000,
+            "tta": False,
+            "spatial_stats": True,
+            "spatial_mode": "rigorous",
+            "spatial_envelope_sims": 999,
+            "spatial_random_seed": 1337,
+            "phenotype_engine": "legacy",
+            "marker_metrics": False,
+            "interaction_metrics": False,
+            "register_retina": False,
+            "atlas_reference": None,
+            "track_longitudinal": False,
+        }
+    )
+
+    assert "Spatial Analysis" in text
+    assert "Rigorous spatial inference" in text
+    assert "CSR envelopes" in text

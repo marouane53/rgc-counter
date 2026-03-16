@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rgc-counter"
-version = "0.6.0"
+version = "1.0.0"
 description = "Local-first retinal spatial phenotyping suite for RGC analysis"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -14,14 +14,14 @@ dependencies = [
   "matplotlib==3.8.2",
   "opencv-python==4.8.1.78",
   "pyyaml==6.0.1",
-  "tifffile==2023.12.9",
+  "tifffile==2023.2.28",
   "torch==2.1.2",
   "torchvision==0.16.2",
   "torchaudio==2.1.2",
   "cellpose==3.1.0",
   "aicsimageio==4.14.0",
   "ome-zarr==0.8.3",
-  "zarr==2.16.1",
+  "zarr==2.15.0",
   "scikit-image==0.22.0",
   "scikit-learn==1.4.2",
   "jinja2==3.1.4",

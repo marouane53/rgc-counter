@@ -23,6 +23,8 @@ from src.regions import assign_regions, summarize_regions
 from src.retina_coords import register_cells, register_focus_mask_pixels, resolve_retina_frame
 from src.review import resolve_edit_log_path
 from src.spatial import (
+    DEFAULT_RIGOROUS_RADII_PX,
+    compute_rigorous_spatial_bundle,
     centroids_from_masks,
     isodensity_map,
     nn_regularity_index,
@@ -452,8 +454,8 @@ class SpatialStatsStage:
     def run(self, ctx: RunContext, cfg: dict[str, Any]) -> RunContext:
         if not cfg.get("spatial_stats"):
             return ctx
-        if ctx.labels is None or ctx.qc_mask is None or ctx.gray is None:
-            raise ValueError("SpatialStatsStage requires labels, qc_mask, and gray image.")
+        if ctx.labels is None or ctx.qc_mask is None or ctx.gray is None or ctx.object_table is None:
+            raise ValueError("SpatialStatsStage requires labels, qc_mask, gray image, and object_table.")
 
         cents = centroids_from_masks(ctx.labels)
         rr = nn_regularity_index(cents)
@@ -471,7 +473,38 @@ class SpatialStatsStage:
         ctx.metrics["spatial"] = spatial
         ctx.state["centroids"] = cents
         ctx.state["isodensity_map"] = isodensity_map(cents, ctx.gray.shape, sigma_px=50.0)
+        ctx.summary_row["spatial_mode"] = cfg.get("spatial_mode", "legacy")
         ctx.summary_row.update(spatial)
+
+        if cfg.get("spatial_mode", "legacy") == "rigorous":
+            tissue_mask = build_tissue_mask(ctx.gray)
+            um_per_px = None
+            max_ecc_um = None
+            registered_tissue_pixels = None
+            if "retina_frame" in ctx.state:
+                um_per_px = float(ctx.state["retina_frame"].um_per_px)
+            if "registered_tissue_pixels" in ctx.state:
+                registered_tissue_pixels = ctx.state["registered_tissue_pixels"]
+            retina_metrics = ctx.metrics.get("retina_registration", {})
+            if isinstance(retina_metrics, dict):
+                max_ecc_um = retina_metrics.get("max_ecc_um")
+
+            rigorous = compute_rigorous_spatial_bundle(
+                image_id=ctx.path.name.rsplit(".", 1)[0],
+                object_table=ctx.object_table,
+                image_shape=ctx.gray.shape,
+                tissue_mask=tissue_mask,
+                um_per_px=um_per_px,
+                registered_tissue_pixels=registered_tissue_pixels,
+                schema_name=cfg.get("region_schema") if registered_tissue_pixels is not None else None,
+                max_ecc_um=float(max_ecc_um) if max_ecc_um is not None else None,
+                radii_px=cfg.get("spatial_radii_px", DEFAULT_RIGOROUS_RADII_PX),
+                simulation_count=int(cfg.get("spatial_envelope_sims", 999)),
+                base_seed=int(cfg.get("spatial_random_seed", 1337)),
+            )
+            ctx.state["rigorous_spatial"] = rigorous
+            ctx.metrics["spatial_analysis"] = rigorous["spatial_analysis"]
+            ctx.summary_row.update(rigorous["global_summary"])
         return ctx
 
 

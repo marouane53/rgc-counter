@@ -121,7 +121,7 @@ def assign_regions(object_table: pd.DataFrame, *, schema_name: str, max_ecc_um: 
     return out
 
 
-def _mask_to_polygon(mask: np.ndarray) -> Polygon | MultiPolygon:
+def mask_to_polygon(mask: np.ndarray) -> Polygon | MultiPolygon:
     contours, hierarchy = cv2.findContours(mask.astype(np.uint8), cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
     if hierarchy is None or not contours:
         return Polygon()
@@ -150,6 +150,32 @@ def _mask_to_polygon(mask: np.ndarray) -> Polygon | MultiPolygon:
         return Polygon()
     merged = unary_union(polygons)
     return merged
+
+
+def build_registered_region_masks(
+    *,
+    tissue_pixels: pd.DataFrame,
+    tissue_mask: np.ndarray,
+    schema_name: str,
+    max_ecc_um: float,
+) -> dict[tuple[str, str], np.ndarray]:
+    if tissue_pixels.empty:
+        return {}
+
+    assigned = assign_regions(tissue_pixels, schema_name=schema_name, max_ecc_um=max_ecc_um)
+    masks: dict[tuple[str, str], np.ndarray] = {}
+    shape = tissue_mask.shape
+    for axis in ("ring", "quadrant", "sector", "peripapillary_bin"):
+        if axis not in assigned.columns:
+            continue
+        for label, frame in assigned.groupby(axis, dropna=False):
+            domain_mask = np.zeros(shape, dtype=bool)
+            ys = np.clip(frame["y_px"].astype(int).to_numpy(), 0, shape[0] - 1)
+            xs = np.clip(frame["x_px"].astype(int).to_numpy(), 0, shape[1] - 1)
+            domain_mask[ys, xs] = True
+            domain_mask &= tissue_mask.astype(bool)
+            masks[(axis, str(label))] = domain_mask
+    return masks
 
 
 def _polar_point(frame: RetinaFrame, radius_px: float, theta_deg: float) -> tuple[float, float]:
@@ -265,7 +291,7 @@ def summarize_regions(
     image_id = Path(source_path).name.rsplit(".", 1)[0]
     max_ecc_um = float(tissue_pixels["ecc_um"].max()) if not tissue_pixels.empty else float(focus_pixels["ecc_um"].max()) if not focus_pixels.empty else 0.0
     max_radius_px = max_ecc_um / frame.um_per_px if frame.um_per_px > 0 else 0.0
-    tissue_polygon = _mask_to_polygon(tissue_mask.astype(bool)) if tissue_mask is not None else Polygon()
+    tissue_polygon = mask_to_polygon(tissue_mask.astype(bool)) if tissue_mask is not None else Polygon()
     axis_polygons = _axis_polygons(schema, frame, max_radius_px)
 
     rows: list[dict[str, object]] = []

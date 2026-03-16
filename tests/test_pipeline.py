@@ -142,3 +142,48 @@ def test_pipeline_runs_v2_phenotype_engine_and_interaction_metrics():
     assert list(out.object_table["phenotype"]) == ["rgc", "microglia"]
     assert "interaction.nearest_any_px" in out.object_table.columns
     assert out.metrics["phenotype_counts"]["rgc"] == 1
+
+
+def test_pipeline_populates_rigorous_spatial_outputs_when_enabled():
+    image = np.zeros((128, 128), dtype=np.uint16)
+    image[8:120, 8:120] = 200
+    labels = np.zeros((128, 128), dtype=np.uint16)
+    labels[18:28, 18:28] = 1
+    labels[18:28, 56:66] = 2
+    labels[18:28, 96:106] = 3
+    labels[56:66, 18:28] = 4
+    labels[56:66, 96:106] = 5
+    labels[96:106, 18:28] = 6
+    labels[96:106, 56:66] = 7
+    labels[96:106, 96:106] = 8
+
+    ctx = RunContext(path=Path("sample.tif"), image=image, meta={"reader": "test"})
+    pipeline = build_default_pipeline(FakeSegmenter(labels))
+    cfg = {
+        "apply_clahe": False,
+        "focus_mode": "none",
+        "tta": False,
+        "tta_transforms": None,
+        "min_size": 1,
+        "max_size": 1000,
+        "spatial_stats": True,
+        "spatial_mode": "rigorous",
+        "spatial_envelope_sims": 8,
+        "spatial_random_seed": 19,
+        "backend": "fake",
+        "use_gpu": False,
+        "register_retina": True,
+        "region_schema": "mouse_flatmount_v1",
+        "onh_mode": "cli",
+        "onh_xy": (64.0, 64.0),
+        "dorsal_xy": (64.0, 8.0),
+        "retina_frame_path": None,
+    }
+
+    out = pipeline.run(ctx, cfg)
+
+    assert out.summary_row["spatial_mode"] == "rigorous"
+    assert out.summary_row["rigorous_global_point_count"] == 8
+    assert "rigorous_spatial" in out.state
+    summary = out.state["rigorous_spatial"]["summary"]
+    assert {"global", "ring", "quadrant", "sector", "peripapillary_bin"}.issubset(set(summary["region_axis"]))

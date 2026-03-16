@@ -21,6 +21,7 @@ def test_write_provenance_serializes_run_payload(tmp_path: Path):
         results_csv_path=tmp_path / "results.csv",
         study_statistics={"requested_mode": "auto", "warnings": ["fell back"]},
         model_spec={"model_label": "fake_builtin:demo", "source": "builtin"},
+        spatial_analysis={"mode": "rigorous", "simulation_count": 8},
     )
     written = write_provenance(tmp_path / "provenance.json", payload)
 
@@ -29,3 +30,4 @@ def test_write_provenance_serializes_run_payload(tmp_path: Path):
     assert data["model_spec"]["model_label"] == "fake_builtin:demo"
     assert data["images"][0]["summary_row"]["cell_count"] == 3
     assert data["study_statistics"]["requested_mode"] == "auto"
+    assert data["spatial_analysis"]["mode"] == "rigorous"
