@@ -13,6 +13,8 @@ def build_methods_appendix(
     region_table: pd.DataFrame | None = None,
     validation_summary: pd.DataFrame | None = None,
     study_statistics: dict[str, Any] | None = None,
+    atlas_subtypes: dict[str, Any] | None = None,
+    tracking: dict[str, Any] | None = None,
 ) -> str:
     model_spec = resolved_config.get("model_spec", {}) if isinstance(resolved_config.get("model_spec"), dict) else {}
     lines: list[str] = []
@@ -41,7 +43,9 @@ def build_methods_appendix(
         lines.append(f"- Region schema: `{resolved_config.get('region_schema')}`")
         lines.append(f"- ONH mode: `{resolved_config.get('onh_mode')}`")
     lines.append(f"- Atlas reference: `{resolved_config.get('atlas_reference')}`")
+    lines.append(f"- Atlas subtype priors: `{resolved_config.get('atlas_subtype_priors')}`")
     lines.append(f"- Longitudinal tracking: `{resolved_config.get('track_longitudinal')}`")
+    lines.append(f"- Tracking mode: `{resolved_config.get('tracking_mode', 'centroid')}`")
     lines.append("")
 
     if model_spec:
@@ -134,6 +138,39 @@ def build_methods_appendix(
                 lines.append(f"  Variance components: `{payload['variance_components']}`")
             for warning in payload.get("warnings", []):
                 lines.append(f"  Warning: {warning}")
+        lines.append("")
+
+    if atlas_subtypes and atlas_subtypes.get("enabled"):
+        lines.append("## Atlas Subtype Priors")
+        lines.append("")
+        lines.append("- Probabilistic atlas-prior subtype scoring was enabled.")
+        lines.append(f"- Atlas subtype prior source: `{atlas_subtypes.get('config_path')}`")
+        lines.append(f"- Atlas name: `{atlas_subtypes.get('atlas_name')}`")
+        lines.append(f"- Retina region schema: `{atlas_subtypes.get('retina_region_schema')}`")
+        lines.append(
+            f"- Region evidence weight: `{atlas_subtypes.get('location_weight')}`, "
+            f"marker evidence weight: `{atlas_subtypes.get('marker_weight')}`."
+        )
+        lines.append(f"- Subtypes scored: `{atlas_subtypes.get('subtypes')}`")
+        lines.append(
+            f"- Registration-backed location evidence used: `{atlas_subtypes.get('used_location_evidence')}`"
+        )
+        lines.append("- These subtype outputs are priors and should not be interpreted as validated subtype truth.")
+        lines.append("")
+
+    if tracking and tracking.get("enabled"):
+        lines.append("## Longitudinal Tracking")
+        lines.append("")
+        lines.append(f"- Tracking mode: `{tracking.get('tracking_mode')}`")
+        lines.append(f"- Maximum displacement threshold: `{tracking.get('max_disp_px')}` pixels")
+        lines.append(f"- Alignment method: `{tracking.get('alignment_method')}`")
+        lines.append(f"- Fallback policy: `{tracking.get('fallback_policy')}`")
+        lines.append(f"- Registered sample pairs: `{tracking.get('n_pairs_registered')}`")
+        lines.append(f"- Fallback sample pairs: `{tracking.get('n_pairs_fallback')}`")
+        if tracking.get("tracking_mode") == "registered":
+            lines.append("- Registered mode used translational phase cross-correlation before Hungarian assignment.")
+            lines.append("- Pairwise registration failures or no-value alignments fell back to centroid matching and started a new common-frame segment.")
+        lines.append("- Longitudinal tracks remain best-effort correspondences and should not be interpreted as validated biological identity truth.")
         lines.append("")
 
     lines.append("## Output Policy")

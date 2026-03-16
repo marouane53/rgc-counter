@@ -22,6 +22,9 @@ def build_sample_table(manifest_df: pd.DataFrame, contexts: list[RunContext]) ->
         if "phenotype_counts" in ctx.metrics:
             for phenotype, count in ctx.metrics["phenotype_counts"].items():
                 row[f"phenotype_count_{phenotype}"] = count
+        if "atlas_subtype_top1_counts" in ctx.metrics:
+            for subtype, count in ctx.metrics["atlas_subtype_top1_counts"].items():
+                row[f"atlas_subtype_top1_count__{subtype}"] = count
         rows.append(row)
     return pd.DataFrame(rows)
 

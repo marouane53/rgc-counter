@@ -67,6 +67,20 @@ This writes:
 
 For production analyses, omit `--spatial_envelope_sims 8` and use the default rigorous simulation budget.
 
+Frontier atlas subtype priors stay opt-in. Example:
+
+```bash
+python main.py \
+  --manifest examples/manifests/example_study_manifest.csv \
+  --study_output_dir Outputs_atlas_subtypes \
+  --register_retina \
+  --region_schema mouse_flatmount_v1 \
+  --atlas_subtype_priors examples/atlas/atlas_subtype_priors.example.yaml \
+  --write_object_table \
+  --write_provenance \
+  --write_html_report
+```
+
 ## Guides
 
 - [Researcher Guide](docs/researcher-guide.md): the main task-driven entrypoint
@@ -110,6 +124,7 @@ Study-mode runs can additionally write:
 Use `python main.py -h` for the full list. Common options:
 - `--backend {cellpose,stardist,sam}`
 - `--cellpose_model`, `--stardist_weights`, `--model_alias`
+- `--atlas_subtype_priors`
 - `--focus_none|--focus_bbox|--focus_auto|--focus_qc`
 - `--tta`, `--tiling --tile_size --tile_overlap`
 - `--spatial_stats --spatial_mode legacy|rigorous`

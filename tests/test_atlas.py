@@ -1,6 +1,8 @@
 import pandas as pd
 
 from src.atlas import compare_region_table_to_atlas, summarize_atlas_comparison
+from src.context import RunContext
+from main import _write_atlas_subtype_outputs
 
 
 def test_compare_region_table_to_atlas_computes_density_deltas():
@@ -48,3 +50,40 @@ def test_summarize_atlas_comparison_groups_by_condition():
     assert len(summary) == 1
     assert summary.loc[0, "n_regions"] == 2
     assert summary.loc[0, "mean_abs_delta_density_cells_per_mm2"] == 15.0
+
+
+def test_write_atlas_subtype_outputs_aggregates_study_tables(tmp_path):
+    manifest = pd.DataFrame(
+        [
+            {
+                "sample_id": "S1",
+                "animal_id": "A1",
+                "eye": "OD",
+                "condition": "treated",
+                "timepoint_dpi": 7,
+                "genotype": "WT",
+            }
+        ]
+    )
+    ctx = RunContext(path=None, image=None, meta={})  # type: ignore[arg-type]
+    ctx.state["atlas_subtypes"] = {
+        "summary": pd.DataFrame(
+            [{"image_id": "img1", "subtype": "alpha_rgc", "top1_count": 3, "top1_fraction": 0.6, "mean_probability": 0.7, "atlas_name": "demo"}]
+        ),
+        "region_summary": pd.DataFrame(
+            [{"image_id": "img1", "region_axis": "quadrant", "region_label": "dorsal_temporal", "subtype": "alpha_rgc", "top1_count": 2, "top1_fraction": 0.5, "mean_probability": 0.75, "atlas_name": "demo"}]
+        ),
+    }
+
+    summary, region_summary, assets = _write_atlas_subtype_outputs(
+        manifest_df=manifest,
+        contexts=[ctx],
+        output_dir=tmp_path,
+    )
+
+    assert not summary.empty
+    assert not region_summary.empty
+    assert summary.loc[0, "sample_id"] == "S1"
+    assert region_summary.loc[0, "region_axis"] == "quadrant"
+    assert len(assets) == 2
+    assert (tmp_path / "atlas_subtypes" / "study_atlas_subtype_summary.csv").exists()

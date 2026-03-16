@@ -15,6 +15,12 @@ import torch
 
 from src import utils
 from src.atlas import compare_region_table_to_atlas, load_atlas_reference, summarize_atlas_comparison
+from src.atlas_subtypes import (
+    atlas_subtype_region_summary_output_path,
+    atlas_subtype_summary_output_path,
+    load_atlas_subtype_priors,
+    write_atlas_subtype_table,
+)
 from src.calibration import (
     apply_dotted_overrides,
     evaluate_count_agreement,
@@ -74,7 +80,11 @@ from src.stats import (
     run_study_statistics,
     write_study_statistics_artifacts,
 )
-from src.track import build_longitudinal_track_table, summarize_tracks
+from src.track import (
+    ALIGNMENT_METHOD,
+    FALLBACK_POLICY,
+    build_longitudinal_tracking_outputs,
+)
 from src.uncertainty_io import save_float_map
 from src.validation import (
     build_validation_table,
@@ -134,6 +144,7 @@ def _build_pipeline_cfg(
     max_size: int,
     phenotype_rules: dict | None = None,
     phenotype_engine_config: dict | None = None,
+    atlas_subtype_priors_config: dict | None = None,
 ) -> dict[str, object]:
     return {
         "apply_clahe": args.apply_clahe,
@@ -154,6 +165,8 @@ def _build_pipeline_cfg(
         "use_gpu": use_gpu,
         "model_spec": model_spec,
         "phenotype_engine": args.phenotype_engine,
+        "atlas_subtype_priors": args.atlas_subtype_priors,
+        "atlas_subtype_priors_config": atlas_subtype_priors_config,
         "marker_metrics": args.marker_metrics,
         "interaction_metrics": args.interaction_metrics,
         "phenotype_rules": phenotype_rules,
@@ -177,6 +190,12 @@ def _load_phenotype_configs(args: argparse.Namespace) -> tuple[dict | None, dict
         else:
             phenotype_engine_config = load_engine_config(args.phenotype_config)
     return ph_rules, phenotype_engine_config
+
+
+def _load_atlas_subtype_config(args: argparse.Namespace) -> dict | None:
+    if not args.atlas_subtype_priors:
+        return None
+    return load_atlas_subtype_priors(args.atlas_subtype_priors)
 
 
 def _save_map_preview(array, destination: str | Path) -> Path:
@@ -301,6 +320,29 @@ def _write_context_artifacts(
         preview = _save_map_preview(ctx.state["focus_score_map"], preview_path)
         ctx.artifacts["focus_score_map_preview"] = preview
         saved_images_for_report.append((f"Focus score preview {os.path.basename(filepath)}", os.path.relpath(preview, report_root)))
+
+    if "atlas_subtypes" in ctx.state:
+        subtype_payload = ctx.state["atlas_subtypes"]
+        summary = subtype_payload.get("summary")
+        region_summary = subtype_payload.get("region_summary")
+        if summary is not None and not summary.empty:
+            summary_path = write_atlas_subtype_table(summary, atlas_subtype_summary_output_path(output_dir, filepath))
+            ctx.artifacts["atlas_subtype_summary"] = summary_path
+            report_assets.append((f"Atlas subtype summary {os.path.basename(filepath)}", os.path.relpath(summary_path, report_root)))
+            report_tables.append({"title": f"Atlas Subtype Priors {os.path.basename(filepath)}", "html": summary.to_html(index=False)})
+        if region_summary is not None and not region_summary.empty:
+            region_summary_path = write_atlas_subtype_table(
+                region_summary,
+                atlas_subtype_region_summary_output_path(output_dir, filepath),
+            )
+            ctx.artifacts["atlas_subtype_region_summary"] = region_summary_path
+            report_assets.append((f"Atlas subtype region summary {os.path.basename(filepath)}", os.path.relpath(region_summary_path, report_root)))
+            report_tables.append(
+                {
+                    "title": f"Atlas Subtype Priors (Regions) {os.path.basename(filepath)}",
+                    "html": region_summary.head(40).to_html(index=False),
+                }
+            )
 
     if "rigorous_spatial" in ctx.state:
         rigorous = ctx.state["rigorous_spatial"]
@@ -476,7 +518,9 @@ def _resolved_config_dict(
         "retina_frame_path": args.retina_frame_path,
         "apply_edits": args.apply_edits,
         "atlas_reference": args.atlas_reference,
+        "atlas_subtype_priors": args.atlas_subtype_priors,
         "track_longitudinal": args.track_longitudinal,
+        "tracking_mode": args.tracking_mode,
         "track_max_disp_px": args.track_max_disp_px,
         "stats_mode": args.stats_mode,
         "manifest": args.manifest,
@@ -531,24 +575,127 @@ def _write_atlas_outputs(
     return atlas_comparison, atlas_summary
 
 
+def _write_atlas_subtype_outputs(
+    *,
+    manifest_df: pd.DataFrame,
+    contexts: list[RunContext],
+    output_dir: Path,
+) -> tuple[pd.DataFrame, pd.DataFrame, list[tuple[str, str]]]:
+    summary_frames: list[pd.DataFrame] = []
+    region_frames: list[pd.DataFrame] = []
+    report_assets: list[tuple[str, str]] = []
+
+    for manifest_row, ctx in zip(manifest_df.to_dict("records"), contexts):
+        payload = ctx.state.get("atlas_subtypes")
+        if not isinstance(payload, dict):
+            continue
+        summary = payload.get("summary")
+        if isinstance(summary, pd.DataFrame) and not summary.empty:
+            frame = summary.copy()
+            frame["sample_id"] = str(manifest_row["sample_id"])
+            for column in ("animal_id", "eye", "condition", "timepoint_dpi", "genotype"):
+                if column in manifest_row:
+                    frame[column] = manifest_row[column]
+            summary_frames.append(frame)
+        region_summary = payload.get("region_summary")
+        if isinstance(region_summary, pd.DataFrame) and not region_summary.empty:
+            frame = region_summary.copy()
+            frame["sample_id"] = str(manifest_row["sample_id"])
+            for column in ("animal_id", "eye", "condition", "timepoint_dpi", "genotype"):
+                if column in manifest_row:
+                    frame[column] = manifest_row[column]
+            region_frames.append(frame)
+
+    summary_table = pd.concat(summary_frames, ignore_index=True) if summary_frames else pd.DataFrame()
+    region_table = pd.concat(region_frames, ignore_index=True) if region_frames else pd.DataFrame()
+    if summary_table.empty and region_table.empty:
+        return pd.DataFrame(), pd.DataFrame(), []
+
+    atlas_dir = output_dir / "atlas_subtypes"
+    atlas_dir.mkdir(parents=True, exist_ok=True)
+    if not summary_table.empty:
+        summary_path = write_atlas_subtype_table(summary_table, atlas_dir / "study_atlas_subtype_summary.csv")
+        report_assets.append(("Atlas subtype summary", os.path.relpath(summary_path, output_dir)))
+    if not region_table.empty:
+        region_path = write_atlas_subtype_table(region_table, atlas_dir / "study_atlas_subtype_region_summary.csv")
+        report_assets.append(("Atlas subtype region summary", os.path.relpath(region_path, output_dir)))
+    return summary_table, region_table, report_assets
+
+
+def _atlas_subtype_provenance_payload(args: argparse.Namespace, contexts: list[RunContext]) -> dict[str, object] | None:
+    if not args.atlas_subtype_priors:
+        return None
+    payloads = [
+        ctx.metrics.get("atlas_subtypes")
+        for ctx in contexts
+        if isinstance(ctx.metrics.get("atlas_subtypes"), dict)
+    ]
+    used_location = any(bool(payload.get("used_location_evidence")) for payload in payloads)
+    base = payloads[0] if payloads else {}
+    return {
+        "enabled": True,
+        "config_path": args.atlas_subtype_priors,
+        "atlas_name": base.get("atlas_name"),
+        "retina_region_schema": base.get("retina_region_schema"),
+        "location_weight": base.get("location_weight"),
+        "marker_weight": base.get("marker_weight"),
+        "subtypes": base.get("subtypes", []),
+        "used_location_evidence": used_location,
+    }
+
+
+def _tracking_provenance_payload(args: argparse.Namespace, track_pair_qc: pd.DataFrame) -> dict[str, object] | None:
+    if not args.track_longitudinal:
+        return None
+    return {
+        "enabled": True,
+        "tracking_mode": args.tracking_mode,
+        "max_disp_px": float(args.track_max_disp_px),
+        "alignment_method": ALIGNMENT_METHOD,
+        "fallback_policy": FALLBACK_POLICY,
+        "n_pairs_registered": int((track_pair_qc.get("tracking_mode_used", pd.Series(dtype=object)) == "registered").sum()),
+        "n_pairs_fallback": int(
+            (
+                (track_pair_qc.get("tracking_mode_requested", pd.Series(dtype=object)) == "registered")
+                & track_pair_qc.get("registration_status", pd.Series(dtype=object)).astype(str).str.startswith("fallback")
+            ).sum()
+        ),
+    }
+
+
 def _write_tracking_outputs(
     *,
     manifest_df: pd.DataFrame,
     contexts: list[RunContext],
     output_dir: Path,
     max_disp_px: float,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    track_table = build_longitudinal_track_table(manifest_df, contexts, max_disp_px=max_disp_px)
+    tracking_mode: str,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[tuple[str, str]]]:
+    track_table, track_pair_qc, track_summary = build_longitudinal_tracking_outputs(
+        manifest_df,
+        contexts,
+        max_disp_px=max_disp_px,
+        tracking_mode=tracking_mode,
+    )
     if track_table.empty:
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), []
 
     track_dir = output_dir / "tracking"
     track_dir.mkdir(parents=True, exist_ok=True)
-    track_table.to_csv(track_dir / "track_observations.csv", index=False)
-    track_summary = summarize_tracks(track_table)
+    track_observations_path = track_dir / "track_observations.csv"
+    track_summary_path = track_dir / "track_summary.csv"
+    track_pair_qc_path = track_dir / "track_pair_qc.csv"
+    track_table.to_csv(track_observations_path, index=False)
+    if not track_pair_qc.empty:
+        track_pair_qc.to_csv(track_pair_qc_path, index=False)
     if not track_summary.empty:
-        track_summary.to_csv(track_dir / "track_summary.csv", index=False)
-    return track_table, track_summary
+        track_summary.to_csv(track_summary_path, index=False)
+    assets = [("Track observations", os.path.relpath(track_observations_path, output_dir))]
+    if not track_pair_qc.empty:
+        assets.append(("Tracking pair QC", os.path.relpath(track_pair_qc_path, output_dir)))
+    if not track_summary.empty:
+        assets.append(("Tracking summary", os.path.relpath(track_summary_path, output_dir)))
+    return track_table, track_pair_qc, track_summary, assets
 
 
 def _run_manifest_contexts(
@@ -824,14 +971,27 @@ def _run_study_mode(
             saved_images_for_report=saved_images_for_report,
         )
 
+    atlas_subtype_summary = pd.DataFrame()
+    atlas_subtype_region_summary = pd.DataFrame()
+    if args.atlas_subtype_priors:
+        atlas_subtype_summary, atlas_subtype_region_summary, atlas_subtype_assets = _write_atlas_subtype_outputs(
+            manifest_df=manifest_df,
+            contexts=processed_contexts,
+            output_dir=study_output_dir,
+        )
+        report_assets.extend(atlas_subtype_assets)
+
     track_table = pd.DataFrame()
+    track_pair_qc = pd.DataFrame()
     track_summary = pd.DataFrame()
+    tracking_assets: list[tuple[str, str]] = []
     if args.track_longitudinal:
-        track_table, track_summary = _write_tracking_outputs(
+        track_table, track_pair_qc, track_summary, tracking_assets = _write_tracking_outputs(
             manifest_df=manifest_df,
             contexts=processed_contexts,
             output_dir=study_output_dir,
             max_disp_px=args.track_max_disp_px,
+            tracking_mode=args.tracking_mode,
         )
 
     stats_dir = study_output_dir / "stats"
@@ -885,6 +1045,8 @@ def _run_study_mode(
         region_table=region_table,
         validation_summary=validation_summary,
         study_statistics=stats_result.decision,
+        atlas_subtypes=_atlas_subtype_provenance_payload(args, processed_contexts),
+        tracking=_tracking_provenance_payload(args, track_pair_qc),
     )
     methods_path = write_methods_appendix(study_output_dir / "methods_appendix.md", methods_appendix)
 
@@ -904,6 +1066,8 @@ def _run_study_mode(
             "tta": args.tta,
             "spatial_mode": args.spatial_mode if args.spatial_stats else "off",
             "stats_mode": args.stats_mode,
+            "atlas_subtype_priors": args.atlas_subtype_priors,
+            "tracking_mode": args.tracking_mode if args.track_longitudinal else "off",
         }
         notes = f"Study mode with {len(sample_table)} samples."
         if stats_result.decision.get("warnings"):
@@ -926,8 +1090,14 @@ def _run_study_mode(
             extra_tables.append({"title": "Validation Summary", "html": validation_summary.to_html(index=False)})
         if not atlas_summary.empty:
             extra_tables.append({"title": "Atlas Summary", "html": atlas_summary.to_html(index=False)})
+        if not atlas_subtype_summary.empty:
+            extra_tables.append({"title": "Atlas Subtype Priors", "html": atlas_subtype_summary.to_html(index=False)})
+        if not atlas_subtype_region_summary.empty:
+            extra_tables.append({"title": "Atlas Subtype Priors (Regions)", "html": atlas_subtype_region_summary.head(40).to_html(index=False)})
         if not track_summary.empty:
             extra_tables.append({"title": "Tracking Summary", "html": track_summary.to_html(index=False)})
+        if not track_pair_qc.empty:
+            extra_tables.append({"title": "Tracking Pair QC", "html": track_pair_qc.to_html(index=False)})
         stats_assets = [
             ("Statistics decision", os.path.relpath(stats_artifacts["statistics_decision"], study_output_dir)),
             ("Design audit (Markdown)", os.path.relpath(stats_artifacts["design_audit_md"], study_output_dir)),
@@ -947,7 +1117,7 @@ def _run_study_mode(
             notes=notes,
             tables=extra_tables,
             methods_appendix=methods_appendix,
-            assets=report_assets + stats_assets + [("Methods appendix", os.path.relpath(methods_path, study_output_dir))],
+            assets=report_assets + tracking_assets + stats_assets + [("Methods appendix", os.path.relpath(methods_path, study_output_dir))],
         )
         print(f"[INFO] HTML report written to {report_path}")
         for ctx in processed_contexts:
@@ -965,6 +1135,8 @@ def _run_study_mode(
             study_statistics=stats_result.decision,
             model_spec=model_spec,
             spatial_analysis=_spatial_analysis_payload(args, processed_contexts),
+            atlas_subtypes=_atlas_subtype_provenance_payload(args, processed_contexts),
+            tracking=_tracking_provenance_payload(args, track_pair_qc),
         )
         provenance_path = write_provenance(study_output_dir / "provenance.json", provenance_payload)
         print(f"[INFO] Provenance written to {provenance_path}")
@@ -1040,7 +1212,9 @@ def main():
     parser.add_argument("--retina_frame_path", type=str, default=None, help="Optional retina frame JSON sidecar")
     parser.add_argument("--apply_edits", type=str, default=None, help="Optional edit-log JSON to replay during the pipeline")
     parser.add_argument("--atlas_reference", type=str, default=None, help="Optional atlas reference CSV for region-wise observed vs expected comparison")
+    parser.add_argument("--atlas_subtype_priors", type=str, default=None, help="Optional YAML atlas subtype prior file for probabilistic cell-level subtype scoring")
     parser.add_argument("--track_longitudinal", action="store_true", help="Build longitudinal cell tracks across timepoints in study mode")
+    parser.add_argument("--tracking_mode", type=str, choices=["centroid", "registered"], default="centroid", help="Longitudinal tracking path: centroid or registration-aware")
     parser.add_argument("--track_max_disp_px", type=float, default=20.0, help="Maximum centroid displacement for longitudinal matching")
     parser.add_argument("--stats_mode", type=str, choices=["auto", "simple", "mixed"], default="auto", help="Study-mode statistics path: auto, simple, or mixed")
 
@@ -1114,6 +1288,7 @@ def main():
 
     # Load phenotype rules if requested
     ph_rules, phenotype_engine_config = _load_phenotype_configs(args)
+    atlas_subtype_priors_config = _load_atlas_subtype_config(args)
 
     bbox_selector = None
     if focus_mode == "bbox":
@@ -1129,6 +1304,7 @@ def main():
         max_size=max_size,
         phenotype_rules=ph_rules,
         phenotype_engine_config=phenotype_engine_config,
+        atlas_subtype_priors_config=atlas_subtype_priors_config,
     )
     pipeline = build_default_pipeline(
         segmenter,
@@ -1259,6 +1435,7 @@ def main():
             "focus_mode": focus_mode,
             "tta": args.tta,
             "spatial_mode": args.spatial_mode if args.spatial_stats else "off",
+            "atlas_subtype_priors": args.atlas_subtype_priors,
         }
         extra_tables = []
         extra_tables.extend(report_tables)
@@ -1297,6 +1474,7 @@ def main():
             results_csv_path=csv_path,
             model_spec=model_spec_to_dict(model_spec),
             spatial_analysis=_spatial_analysis_payload(args, processed_contexts),
+            atlas_subtypes=_atlas_subtype_provenance_payload(args, processed_contexts),
         )
         provenance_path = write_provenance(Path(args.output_dir) / "provenance.json", provenance_payload)
         print(f"[INFO] Provenance written to {provenance_path}")

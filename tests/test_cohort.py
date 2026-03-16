@@ -56,3 +56,28 @@ def test_build_study_region_table_adds_manifest_metadata():
 
     assert out.loc[0, "sample_id"] == "S1"
     assert out.loc[0, "region_label"] == "central"
+
+
+def test_build_sample_table_adds_atlas_subtype_counts():
+    manifest = pd.DataFrame(
+        [
+            {
+                "sample_id": "S1",
+                "animal_id": "A1",
+                "eye": "OD",
+                "condition": "treated",
+                "genotype": "WT",
+                "timepoint_dpi": 7,
+                "modality": "flatmount",
+                "path": "/tmp/sample.tif",
+            }
+        ]
+    )
+    ctx = RunContext(path=Path("/tmp/sample.tif"), image=None, meta={})  # type: ignore[arg-type]
+    ctx.summary_row = {"filename": "sample.tif", "cell_count": 10}
+    ctx.metrics["atlas_subtype_top1_counts"] = {"alpha_rgc": 6, "iprgc": 4}
+
+    out = build_sample_table(manifest, [ctx])
+
+    assert out.loc[0, "atlas_subtype_top1_count__alpha_rgc"] == 6
+    assert out.loc[0, "atlas_subtype_top1_count__iprgc"] == 4

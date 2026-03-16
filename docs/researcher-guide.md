@@ -64,6 +64,20 @@ For production analyses, omit `--spatial_envelope_sims 8` and use the default ri
 
 For the full reviewer-facing path, go to [Paper Workflow](paper-workflow.md).
 
+Frontier atlas subtype priors are opt-in. Minimal example:
+
+```bash
+python main.py \
+  --manifest examples/manifests/example_study_manifest.csv \
+  --study_output_dir Outputs_atlas_subtypes \
+  --register_retina \
+  --region_schema mouse_flatmount_v1 \
+  --atlas_subtype_priors examples/atlas/atlas_subtype_priors.example.yaml \
+  --write_object_table \
+  --write_provenance \
+  --write_html_report
+```
+
 ## I want to review a few bad segmentations
 
 Launch napari:

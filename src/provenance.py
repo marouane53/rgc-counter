@@ -74,6 +74,8 @@ def build_run_provenance(
     study_statistics: dict[str, Any] | None = None,
     model_spec: dict[str, Any] | None = None,
     spatial_analysis: dict[str, Any] | None = None,
+    atlas_subtypes: dict[str, Any] | None = None,
+    tracking: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "provenance_version": PROVENANCE_VERSION,
@@ -91,6 +93,10 @@ def build_run_provenance(
         payload["model_spec"] = model_spec
     if spatial_analysis is not None:
         payload["spatial_analysis"] = spatial_analysis
+    if atlas_subtypes is not None:
+        payload["atlas_subtypes"] = atlas_subtypes
+    if tracking is not None:
+        payload["tracking"] = tracking
     return payload
 
 

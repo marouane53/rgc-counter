@@ -10,6 +10,12 @@ import numpy as np
 import torch
 
 from src import utils
+from src.atlas_subtypes import (
+    atlas_subtype_region_summary_output_path,
+    atlas_subtype_summary_output_path,
+    load_atlas_subtype_priors,
+    write_atlas_subtype_table,
+)
 from src.config import (
     CELL_DIAMETER,
     MAX_CELL_SIZE,
@@ -77,6 +83,7 @@ class RuntimeOptions:
     sam_checkpoint: str | None = None
     phenotype_config: str | None = None
     phenotype_engine: str = "legacy"
+    atlas_subtype_priors: str | None = None
     marker_metrics: bool = False
     interaction_metrics: bool = False
     tta: bool = False
@@ -157,6 +164,7 @@ def _resolved_config(runtime: AppRuntime) -> dict[str, Any]:
         "spatial_envelope_sims": options.spatial_envelope_sims,
         "spatial_random_seed": options.spatial_random_seed,
         "phenotype_engine": options.phenotype_engine,
+        "atlas_subtype_priors": options.atlas_subtype_priors,
         "marker_metrics": options.marker_metrics,
         "interaction_metrics": options.interaction_metrics,
         "register_retina": options.register_retina,
@@ -220,6 +228,7 @@ def build_runtime(
         print(f"[WARNING] {warning}")
 
     phenotype_rules, phenotype_engine_config = _load_phenotype_configs(options)
+    atlas_subtype_priors_config = load_atlas_subtype_priors(options.atlas_subtype_priors) if options.atlas_subtype_priors else None
     segmenter = segmenter_override or build_segmenter(
         model_spec=model_spec,
         diameter=diameter,
@@ -244,6 +253,8 @@ def build_runtime(
         "use_gpu": use_gpu,
         "model_spec": model_summary_fields(model_spec),
         "phenotype_engine": options.phenotype_engine,
+        "atlas_subtype_priors": options.atlas_subtype_priors,
+        "atlas_subtype_priors_config": atlas_subtype_priors_config,
         "marker_metrics": options.marker_metrics,
         "interaction_metrics": options.interaction_metrics,
         "phenotype_rules": phenotype_rules,
@@ -438,6 +449,24 @@ def export_context(
         ctx.artifacts["focus_score_map_preview"] = preview
         saved_images_for_report.append(("Focus score preview", str(preview.relative_to(output_dir))))
 
+    if "atlas_subtypes" in ctx.state:
+        subtype_payload = ctx.state["atlas_subtypes"]
+        summary = subtype_payload.get("summary")
+        region_summary = subtype_payload.get("region_summary")
+        if summary is not None and not summary.empty:
+            summary_path = write_atlas_subtype_table(summary, atlas_subtype_summary_output_path(output_dir, ctx.path))
+            ctx.artifacts["atlas_subtype_summary"] = summary_path
+            report_assets.append(("Atlas subtype summary", str(summary_path.relative_to(output_dir))))
+            report_tables.append({"title": "Atlas Subtype Priors", "html": summary.to_html(index=False)})
+        if region_summary is not None and not region_summary.empty:
+            region_summary_path = write_atlas_subtype_table(
+                region_summary,
+                atlas_subtype_region_summary_output_path(output_dir, ctx.path),
+            )
+            ctx.artifacts["atlas_subtype_region_summary"] = region_summary_path
+            report_assets.append(("Atlas subtype region summary", str(region_summary_path.relative_to(output_dir))))
+            report_tables.append({"title": "Atlas Subtype Priors (Regions)", "html": region_summary.head(40).to_html(index=False)})
+
     if "rigorous_spatial" in ctx.state:
         rigorous = ctx.state["rigorous_spatial"]
         summary = rigorous.get("summary", None)
@@ -513,6 +542,7 @@ def export_context(
                 "focus_mode": runtime.options.focus_mode,
                 "tta": runtime.options.tta,
                 "spatial_mode": runtime.options.spatial_mode if runtime.options.spatial_stats else "off",
+                "atlas_subtype_priors": runtime.options.atlas_subtype_priors,
             },
             [dict(ctx.summary_row)],
             images=saved_images_for_report,
@@ -534,6 +564,7 @@ def export_context(
                 results_csv_path=csv_path,
                 model_spec=model_spec_to_dict(runtime.model_spec),
                 spatial_analysis=ctx.state.get("rigorous_spatial", {}).get("spatial_analysis"),
+                atlas_subtypes=ctx.metrics.get("atlas_subtypes"),
             ),
         )
         ctx.artifacts["provenance"] = provenance_path

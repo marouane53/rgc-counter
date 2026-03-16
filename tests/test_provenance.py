@@ -22,6 +22,8 @@ def test_write_provenance_serializes_run_payload(tmp_path: Path):
         study_statistics={"requested_mode": "auto", "warnings": ["fell back"]},
         model_spec={"model_label": "fake_builtin:demo", "source": "builtin"},
         spatial_analysis={"mode": "rigorous", "simulation_count": 8},
+        atlas_subtypes={"enabled": True, "atlas_name": "demo_subtypes", "used_location_evidence": True},
+        tracking={"enabled": True, "tracking_mode": "registered", "n_pairs_registered": 1, "n_pairs_fallback": 0},
     )
     written = write_provenance(tmp_path / "provenance.json", payload)
 
@@ -31,3 +33,5 @@ def test_write_provenance_serializes_run_payload(tmp_path: Path):
     assert data["images"][0]["summary_row"]["cell_count"] == 3
     assert data["study_statistics"]["requested_mode"] == "auto"
     assert data["spatial_analysis"]["mode"] == "rigorous"
+    assert data["atlas_subtypes"]["atlas_name"] == "demo_subtypes"
+    assert data["tracking"]["tracking_mode"] == "registered"

@@ -93,3 +93,79 @@ def test_build_methods_appendix_describes_rigorous_spatial_analysis():
     assert "Spatial Analysis" in text
     assert "Rigorous spatial inference" in text
     assert "CSR envelopes" in text
+
+
+def test_build_methods_appendix_describes_atlas_subtype_priors():
+    text = build_methods_appendix(
+        resolved_config={
+            "backend": "cellpose",
+            "modality": "flatmount",
+            "modality_projection": "max",
+            "focus_mode": "none",
+            "use_gpu": False,
+            "diameter": None,
+            "min_size": 5,
+            "max_size": 1000,
+            "tta": False,
+            "spatial_stats": False,
+            "phenotype_engine": "legacy",
+            "marker_metrics": True,
+            "interaction_metrics": False,
+            "register_retina": True,
+            "atlas_reference": None,
+            "atlas_subtype_priors": "examples/atlas/atlas_subtype_priors.example.yaml",
+            "track_longitudinal": False,
+        },
+        atlas_subtypes={
+            "enabled": True,
+            "config_path": "examples/atlas/atlas_subtype_priors.example.yaml",
+            "atlas_name": "demo_subtypes",
+            "retina_region_schema": "mouse_flatmount_v1",
+            "location_weight": 0.7,
+            "marker_weight": 0.3,
+            "subtypes": ["alpha_rgc", "iprgc"],
+            "used_location_evidence": True,
+        },
+    )
+
+    assert "Atlas Subtype Priors" in text
+    assert "probabilistic atlas-prior subtype scoring" in text.lower()
+    assert "validated subtype truth" in text
+
+
+def test_build_methods_appendix_describes_registration_aware_tracking():
+    text = build_methods_appendix(
+        resolved_config={
+            "backend": "cellpose",
+            "modality": "flatmount",
+            "modality_projection": "max",
+            "focus_mode": "none",
+            "use_gpu": False,
+            "diameter": None,
+            "min_size": 5,
+            "max_size": 1000,
+            "tta": False,
+            "spatial_stats": False,
+            "phenotype_engine": "legacy",
+            "marker_metrics": False,
+            "interaction_metrics": False,
+            "register_retina": False,
+            "atlas_reference": None,
+            "atlas_subtype_priors": None,
+            "track_longitudinal": True,
+            "tracking_mode": "registered",
+        },
+        tracking={
+            "enabled": True,
+            "tracking_mode": "registered",
+            "max_disp_px": 20.0,
+            "alignment_method": "phase_cross_correlation",
+            "fallback_policy": "centroid_fallback_with_qc_flag",
+            "n_pairs_registered": 3,
+            "n_pairs_fallback": 1,
+        },
+    )
+
+    assert "Longitudinal Tracking" in text
+    assert "phase cross-correlation" in text.lower()
+    assert "best-effort correspondences" in text

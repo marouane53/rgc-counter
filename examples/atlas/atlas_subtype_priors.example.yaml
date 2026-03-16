@@ -1,0 +1,38 @@
+schema_version: 1
+atlas_name: demo_subtypes
+retina_region_schema: mouse_flatmount_v1
+location_weight: 0.7
+marker_weight: 0.3
+subtypes:
+  alpha_rgc:
+    location_priors:
+      ring:
+        weight: 0.6
+        priors:
+          central: 0.8
+          pericentral: 0.5
+          peripheral: 0.2
+      quadrant:
+        weight: 0.4
+        priors:
+          dorsal_temporal: 0.8
+          ventral_nasal: 0.3
+    markers:
+      - feature: channel.mean_bgsub.GRAY
+        direction: high
+        center: 1.5
+        scale: 0.75
+        weight: 1.0
+  iprgc:
+    location_priors:
+      quadrant:
+        weight: 1.0
+        priors:
+          dorsal_temporal: 0.3
+          ventral_nasal: 0.8
+    markers:
+      - feature: channel.mean_bgsub.GRAY
+        direction: high
+        center: 0.75
+        scale: 0.5
+        weight: 1.0

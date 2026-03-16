@@ -25,6 +25,7 @@ Use this with:
 
 - `phenotype_rules/phenotype_rules.v2.example.yaml`
 - `atlas/atlas_reference.example.csv`
+- `atlas/atlas_subtype_priors.example.yaml`
 - `calibration/calibration_grid.example.yaml`
 
 Use these with:

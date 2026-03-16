@@ -187,3 +187,111 @@ def test_pipeline_populates_rigorous_spatial_outputs_when_enabled():
     assert "rigorous_spatial" in out.state
     summary = out.state["rigorous_spatial"]["summary"]
     assert {"global", "ring", "quadrant", "sector", "peripapillary_bin"}.issubset(set(summary["region_axis"]))
+
+
+def test_pipeline_runs_atlas_subtype_priors_with_registration():
+    image = np.zeros((32, 32, 2), dtype=np.uint8)
+    image[4:10, 4:10, 0] = 220
+    image[18:24, 18:24, 1] = 220
+    labels = np.zeros((32, 32), dtype=np.uint16)
+    labels[4:10, 4:10] = 1
+    labels[18:24, 18:24] = 2
+
+    priors = {
+        "schema_version": 1,
+        "config_path": "demo.yaml",
+        "atlas_name": "demo_subtypes",
+        "retina_region_schema": "mouse_flatmount_v1",
+        "location_weight": 0.7,
+        "marker_weight": 0.3,
+        "channels": {"RBPMS": 0, "MELANOPSIN": 1},
+        "compose": {},
+        "subtypes": {
+            "alpha_rgc": {
+                "slug": "alpha_rgc",
+                "location_priors": {"quadrant": {"weight": 1.0, "priors": {"dorsal_temporal": 0.9, "ventral_nasal": 0.2}}},
+                "markers": [{"feature": "channel.mean_bgsub.RBPMS", "direction": "high", "center": 1.0, "scale": 0.5, "weight": 1.0}],
+            },
+            "iprgc": {
+                "slug": "iprgc",
+                "location_priors": {"quadrant": {"weight": 1.0, "priors": {"dorsal_temporal": 0.2, "ventral_nasal": 0.9}}},
+                "markers": [{"feature": "channel.mean_bgsub.MELANOPSIN", "direction": "high", "center": 1.0, "scale": 0.5, "weight": 1.0}],
+            },
+        },
+    }
+
+    ctx = RunContext(path=Path("sample.tif"), image=image, meta={"reader": "test"})
+    pipeline = build_default_pipeline(FakeSegmenter(labels))
+    cfg = {
+        "apply_clahe": False,
+        "focus_mode": "none",
+        "tta": False,
+        "tta_transforms": None,
+        "min_size": 1,
+        "max_size": 1000,
+        "spatial_stats": False,
+        "backend": "fake",
+        "use_gpu": False,
+        "register_retina": True,
+        "region_schema": "mouse_flatmount_v1",
+        "onh_mode": "cli",
+        "onh_xy": (16.0, 16.0),
+        "dorsal_xy": (16.0, 0.0),
+        "retina_frame_path": None,
+        "atlas_subtype_priors_config": priors,
+    }
+
+    out = pipeline.run(ctx, cfg)
+
+    assert "atlas_subtype_top1" in out.object_table.columns
+    assert "atlas_subtypes" in out.state
+    assert out.metrics["atlas_subtype_top1_counts"]["alpha_rgc"] == 1
+    assert not out.state["atlas_subtypes"]["summary"].empty
+    assert not out.state["atlas_subtypes"]["region_summary"].empty
+
+
+def test_pipeline_runs_atlas_subtype_priors_without_registration_with_warning():
+    image = np.zeros((32, 32, 2), dtype=np.uint8)
+    image[4:10, 4:10, 0] = 220
+    labels = np.zeros((32, 32), dtype=np.uint16)
+    labels[4:10, 4:10] = 1
+
+    priors = {
+        "schema_version": 1,
+        "config_path": "demo.yaml",
+        "atlas_name": "demo_subtypes",
+        "retina_region_schema": "mouse_flatmount_v1",
+        "location_weight": 0.7,
+        "marker_weight": 0.3,
+        "channels": {"RBPMS": 0},
+        "compose": {},
+        "subtypes": {
+            "alpha_rgc": {
+                "slug": "alpha_rgc",
+                "location_priors": {"quadrant": {"weight": 1.0, "priors": {"dorsal_temporal": 0.9}}},
+                "markers": [{"feature": "channel.mean_bgsub.RBPMS", "direction": "high", "center": 1.0, "scale": 0.5, "weight": 1.0}],
+            }
+        },
+    }
+
+    ctx = RunContext(path=Path("sample.tif"), image=image, meta={"reader": "test"})
+    pipeline = build_default_pipeline(FakeSegmenter(labels))
+    cfg = {
+        "apply_clahe": False,
+        "focus_mode": "none",
+        "tta": False,
+        "tta_transforms": None,
+        "min_size": 1,
+        "max_size": 1000,
+        "spatial_stats": False,
+        "backend": "fake",
+        "use_gpu": False,
+        "register_retina": False,
+        "atlas_subtype_priors_config": priors,
+    }
+
+    out = pipeline.run(ctx, cfg)
+
+    assert "atlas_subtype_top1" in out.object_table.columns
+    assert out.state["atlas_subtypes"]["region_summary"].empty
+    assert any("marker evidence only" in warning for warning in out.warnings)

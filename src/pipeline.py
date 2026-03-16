@@ -7,6 +7,7 @@ from typing import Any, Callable, Protocol
 import numpy as np
 
 from src.analysis import compute_cell_count_and_density
+from src.atlas_subtypes import score_atlas_subtypes
 from src.edits import apply_edit_log, load_edit_log
 from src.interactions import add_interaction_metrics
 from src.landmarks import build_tissue_mask
@@ -299,10 +300,18 @@ class MarkerMetricsStage:
     def run(self, ctx: RunContext, cfg: dict[str, Any]) -> RunContext:
         if ctx.object_table is None or ctx.labels is None:
             raise ValueError("MarkerMetricsStage requires object_table and labels.")
-        if not cfg.get("marker_metrics") and cfg.get("phenotype_engine", "legacy") != "v2":
+        if (
+            not cfg.get("marker_metrics")
+            and cfg.get("phenotype_engine", "legacy") != "v2"
+            and cfg.get("atlas_subtype_priors_config") is None
+        ):
             return ctx
 
-        engine_config = cfg.get("phenotype_engine_config", self.phenotype_engine_config) if cfg.get("phenotype_engine", "legacy") == "v2" else None
+        engine_config = None
+        if cfg.get("phenotype_engine", "legacy") == "v2":
+            engine_config = cfg.get("phenotype_engine_config", self.phenotype_engine_config)
+        elif cfg.get("atlas_subtype_priors_config") is not None:
+            engine_config = cfg.get("atlas_subtype_priors_config")
         ctx.object_table = add_marker_metrics(ctx.object_table, ctx.image, ctx.labels, config=engine_config)
         return ctx
 
@@ -435,6 +444,50 @@ class RetinaRegistrationStage:
 
 
 @dataclass
+class AtlasSubtypeStage:
+    name: str = "atlas_subtypes"
+
+    def run(self, ctx: RunContext, cfg: dict[str, Any]) -> RunContext:
+        config = cfg.get("atlas_subtype_priors_config")
+        if config is None:
+            return ctx
+        if ctx.object_table is None:
+            raise ValueError("AtlasSubtypeStage requires object_table.")
+
+        result = score_atlas_subtypes(ctx.object_table, config)
+        ctx.object_table = result["object_table"]
+        ctx.state["atlas_subtypes"] = {
+            "summary": result["summary"],
+            "region_summary": result["region_summary"],
+            "atlas_name": result["atlas_name"],
+            "used_location_evidence": result["used_location_evidence"],
+            "subtypes": result["subtypes"],
+            "top1_counts": result["top1_counts"],
+            "retina_region_schema": config.get("retina_region_schema"),
+            "location_weight": float(config.get("location_weight", 0.7)),
+            "marker_weight": float(config.get("marker_weight", 0.3)),
+            "config_path": config.get("config_path"),
+        }
+        ctx.metrics["atlas_subtypes"] = {
+            "enabled": True,
+            "atlas_name": result["atlas_name"],
+            "config_path": config.get("config_path"),
+            "retina_region_schema": config.get("retina_region_schema"),
+            "location_weight": float(config.get("location_weight", 0.7)),
+            "marker_weight": float(config.get("marker_weight", 0.3)),
+            "subtypes": result["subtypes"],
+            "used_location_evidence": result["used_location_evidence"],
+            "top1_counts": result["top1_counts"],
+        }
+        ctx.metrics["atlas_subtype_top1_counts"] = result["top1_counts"]
+        if not result["used_location_evidence"]:
+            ctx.warnings.append(
+                "Atlas subtype priors ran without registration-backed location evidence; marker evidence only."
+            )
+        return ctx
+
+
+@dataclass
 class InteractionMetricsStage:
     name: str = "interaction_metrics"
 
@@ -526,6 +579,7 @@ def build_default_pipeline(
         PhenotypeEngineStage(phenotype_engine_config=phenotype_engine_config),
         ReviewStage(phenotype_engine_config=phenotype_engine_config),
         RetinaRegistrationStage(),
+        AtlasSubtypeStage(),
         InteractionMetricsStage(),
         SpatialStatsStage(),
     ]
