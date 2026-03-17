@@ -3,7 +3,8 @@ import pandas as pd
 import pytest
 from shapely.geometry import Polygon
 
-from src.retina_coords import register_focus_mask_pixels, retina_frame_from_points
+from src.regions import assign_regions
+from src.retina_coords import register_cells, register_focus_mask_pixels, retina_frame_from_points
 from src.spatial import (
     compute_csr_envelopes,
     compute_rigorous_spatial_bundle,
@@ -114,8 +115,28 @@ def test_compute_rigorous_bundle_uses_tissue_mask_for_global_domain():
 
     global_row = bundle["summary"].query("analysis_level == 'global'").iloc[0]
     assert global_row["domain_area_px"] == pytest.approx(float(tissue_mask.sum()))
+    assert int(global_row["n_points"]) == len(object_table)
     assert global_row["status"] == "ok"
     assert "l_obs" in bundle["curves"].columns
+
+
+def test_compute_rigorous_bundle_global_point_count_matches_kept_object_table_count():
+    tissue_mask = np.ones((128, 128), dtype=bool)
+    object_table = _object_table_from_points(_grid_points())
+    object_table.loc[object_table["object_id"] == 1, "kept"] = False
+
+    bundle = compute_rigorous_spatial_bundle(
+        image_id="sample",
+        object_table=object_table,
+        image_shape=tissue_mask.shape,
+        tissue_mask=tissue_mask,
+        um_per_px=1.0,
+        simulation_count=8,
+        base_seed=11,
+    )
+
+    global_row = bundle["summary"].query("analysis_level == 'global'").iloc[0]
+    assert int(global_row["n_points"]) == int(object_table["kept"].fillna(True).astype(bool).sum())
 
 
 def test_compute_rigorous_bundle_includes_registered_region_domains():
@@ -158,6 +179,60 @@ def test_compute_rigorous_bundle_includes_registered_region_domains():
     summary = bundle["summary"]
     assert {"global", "ring", "quadrant", "sector", "peripapillary_bin"}.issubset(set(summary["region_axis"]))
     assert bundle["spatial_analysis"]["regionwise_analysis_run"] is True
+
+
+def test_region_point_counts_match_assign_regions_membership():
+    tissue_mask = np.ones((128, 128), dtype=bool)
+    frame = retina_frame_from_points(
+        onh_xy_px=(64.0, 64.0),
+        dorsal_xy_px=(64.0, 8.0),
+        um_per_px=1.0,
+        source="cli",
+    )
+    tissue_pixels = register_focus_mask_pixels(tissue_mask, frame)
+    points = np.asarray(
+        [
+            [24.0, 24.0],
+            [24.0, 64.0],
+            [24.0, 104.0],
+            [64.0, 24.0],
+            [64.0, 104.0],
+            [104.0, 24.0],
+            [104.0, 64.0],
+            [104.0, 104.0],
+        ],
+        dtype=float,
+    )
+    registered = register_cells(_object_table_from_points(points), frame)
+    assigned = assign_regions(
+        registered,
+        schema_name="mouse_flatmount_v1",
+        max_ecc_um=float(tissue_pixels["ecc_um"].max()),
+    )
+
+    bundle = compute_rigorous_spatial_bundle(
+        image_id="sample",
+        object_table=assigned,
+        image_shape=tissue_mask.shape,
+        tissue_mask=tissue_mask,
+        um_per_px=1.0,
+        registered_tissue_pixels=tissue_pixels,
+        schema_name="mouse_flatmount_v1",
+        max_ecc_um=float(tissue_pixels["ecc_um"].max()),
+        simulation_count=8,
+        base_seed=23,
+    )
+
+    region_summary = bundle["summary"].query("analysis_level == 'region'")
+    for axis in ("ring", "quadrant", "sector", "peripapillary_bin"):
+        expected = assigned.groupby(axis).size().to_dict()
+        actual = (
+            region_summary[region_summary["region_axis"] == axis]
+            .set_index("region_label")["n_points"]
+            .to_dict()
+        )
+        for label, count in expected.items():
+            assert int(actual[str(label)]) == int(count)
 
 
 def test_compute_rigorous_bundle_marks_insufficient_point_domains():

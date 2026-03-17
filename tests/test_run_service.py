@@ -1,9 +1,12 @@
+from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import tifffile
 
-from src.run_service import RuntimeOptions, build_runtime, export_context, run_array
+from main import _run_manifest_contexts
+from src.run_service import RuntimeOptions, build_runtime, export_context, run_array, run_one_image
 
 
 class FakeSegmenter:
@@ -224,3 +227,54 @@ subtypes:
     assert "atlas_subtype_top1" in object_table.columns
     provenance = (tmp_path / "atlas_bundle" / "provenance.json").read_text(encoding="utf-8")
     assert "atlas_subtypes" in provenance
+
+
+def test_run_one_image_matches_study_wrapper_for_same_input(tmp_path: Path):
+    image_path = tmp_path / "sample.tif"
+    image = np.zeros((32, 32), dtype=np.uint16)
+    tifffile.imwrite(image_path, image)
+
+    labels = np.zeros((32, 32), dtype=np.uint16)
+    labels[4:10, 4:10] = 1
+    labels[18:24, 18:24] = 2
+
+    runtime = build_runtime(
+        RuntimeOptions(
+            backend="fake",
+            focus_mode="none",
+            write_html_report=False,
+            write_object_table=False,
+            write_provenance=False,
+            save_debug=False,
+        ),
+        segmenter_override=FakeSegmenter(labels),
+    )
+
+    direct = run_one_image(runtime, image_path=image_path)
+    manifest = pd.DataFrame(
+        [
+            {
+                "sample_id": "S1",
+                "path": str(image_path),
+                "modality": "flatmount",
+            }
+        ]
+    )
+    args = SimpleNamespace(register_retina=False, retina_frame_path=None, modality="flatmount")
+    contexts, _, _, _ = _run_manifest_contexts(
+        args=args,
+        manifest_df=manifest,
+        runtime=runtime,
+        pipeline_cfg=runtime.pipeline_cfg,
+        output_root=None,
+        write_artifacts=False,
+    )
+    wrapped = contexts[0]
+
+    assert wrapped.summary_row["cell_count"] == direct.summary_row["cell_count"]
+    assert wrapped.metrics["image_shape"] == direct.metrics["image_shape"]
+    assert wrapped.warnings == direct.warnings
+    assert np.allclose(
+        wrapped.object_table[["centroid_y_px", "centroid_x_px"]].to_numpy(dtype=float),
+        direct.object_table[["centroid_y_px", "centroid_x_px"]].to_numpy(dtype=float),
+    )

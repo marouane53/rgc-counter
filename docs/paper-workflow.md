@@ -18,6 +18,7 @@ python main.py \
 ```
 
 This is the reproducible tracked-example path.
+The tracked TIFFs in `examples/smoke_data/` are smoke/demo regression fixtures only; they are not the scientific count-validation benchmark for the paper.
 
 For production analyses:
 - omit `--spatial_envelope_sims 8`
@@ -81,5 +82,8 @@ Tracked assets used by this workflow:
 - `examples/smoke_data/example_retina_a.tif`
 - `examples/smoke_data/example_retina_b.tif`
 - `examples/manual_annotations/example_manual_annotations.csv`
+
+Use the tracked TIFFs and manual-count CSV to keep the workflow reproducible and regression-tested.
+Do not treat these tiny smoke fixtures as matched-modality biological validation data.
 
 For model benchmarking before a paper run, use [Model Training](model-training.md).

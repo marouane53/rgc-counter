@@ -184,6 +184,8 @@ def test_pipeline_populates_rigorous_spatial_outputs_when_enabled():
 
     assert out.summary_row["spatial_mode"] == "rigorous"
     assert out.summary_row["rigorous_global_point_count"] == 8
+    assert out.metrics["object_flow"]["n_objects_kept"] == 8
+    assert out.metrics["object_flow"]["n_points_global_domain"] == 8
     assert "rigorous_spatial" in out.state
     summary = out.state["rigorous_spatial"]["summary"]
     assert {"global", "ring", "quadrant", "sector", "peripapillary_bin"}.issubset(set(summary["region_axis"]))

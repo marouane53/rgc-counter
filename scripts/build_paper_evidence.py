@@ -1683,10 +1683,10 @@ def write_summary_files(
             "notes": "This claim is about workflow execution and artifacts, not RGC count accuracy.",
         },
         {
-            "claim": "The repo has at least one quantitative benchmark tied to tracked manual references, plus a separate labeled model-evaluation lane.",
+            "claim": "The repo has tracked smoke/manual regression surfaces plus a separate labeled model-evaluation lane.",
             "status": "supported" if benchmark_ok else "unsupported",
             "evidence_path": repo_relative(evidence_root / "05_quantitative_results" / "count_error_metrics.csv"),
-            "notes": "The paper-facing tracked benchmark uses manual counts; labeled TIFFs remain a separate model-evaluation fixture lane.",
+            "notes": "These tracked smoke/manual files are regression fixtures only; they are not the matched-modality scientific benchmark for the paper.",
         },
         {
             "claim": "Universal RGC counting superiority across modalities.",
@@ -1768,13 +1768,13 @@ def write_summary_files(
         {'Yes, the OIR external retinal pass produced report/provenance outputs.' if oir_ok else 'No, the OIR external retinal pass did not complete end-to-end.'}
 
         4. Did we obtain at least one quantitative benchmark with manual or reference data?
-        {'Yes, the tracked manual-count benchmark produced benchmark files, and the model-evaluation helper remains a separate labeled-fixture lane.' if benchmark_ok else 'No, the benchmark files were not fully produced.'}
+        {'Only smoke/demo regression surfaces are available in-repo today: the tracked manual-count lane and the separate labeled model-evaluation fixture lane both produced files, but neither should be framed as the matched-modality scientific benchmark.' if benchmark_ok else 'No, the benchmark files were not fully produced.'}
 
         5. Which claims are supported right now?
         - Reproducible engineering validation on a fresh venv, if pytest passed
         - Canonical tracked-example workflow with report, methods, provenance, and study outputs
         - External real-data workflow execution on OIR if the OIR report exists
-        - Conservative quantitative validation from tracked manual references, plus a separate labeled model-evaluation lane
+        - Smoke/demo regression from tracked manual references, plus a separate labeled model-evaluation lane
         - Single-image tracked output retained only as a QC/demo lane, not as a count-comparable validation surface
 
         6. Which claims are not yet supported and must not appear in the paper?

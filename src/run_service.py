@@ -27,7 +27,7 @@ from src.config import (
     data as CONFIG_DATA,
 )
 from src.context import RunContext
-from src.io_ome import save_labels_to_ome_zarr
+from src.io_ome import load_any_image, save_labels_to_ome_zarr
 from src.measurements import object_table_path_for, write_object_table
 from src.model_registry import ModelSpec, model_spec_to_dict, model_summary_fields, model_warning, resolve_model_spec
 from src.modalities import adapt_image_for_modality
@@ -291,6 +291,40 @@ def build_runtime(
     return runtime
 
 
+def _run_with_cfg(
+    runtime: AppRuntime,
+    *,
+    image: np.ndarray,
+    source_path: str | Path,
+    meta: dict[str, Any] | None = None,
+    modality_override: str | None = None,
+    pipeline_cfg_overrides: dict[str, Any] | None = None,
+) -> RunContext:
+    modality = modality_override or runtime.options.modality
+    adapted_image, adapted_meta = adapt_image_for_modality(
+        image,
+        meta,
+        modality=modality,
+        projection=runtime.options.modality_projection,
+        channel_index=runtime.options.modality_channel_index,
+        slab_start=runtime.options.modality_slab_start,
+        slab_end=runtime.options.modality_slab_end,
+    )
+    if adapted_meta is None:
+        adapted_meta = {}
+    adapted_meta["modality"] = modality
+
+    pipeline_cfg = copy.deepcopy(runtime.pipeline_cfg)
+    if pipeline_cfg_overrides:
+        pipeline_cfg.update(copy.deepcopy(pipeline_cfg_overrides))
+
+    ctx = RunContext(path=Path(source_path), image=adapted_image, meta=adapted_meta)
+    ctx = runtime.pipeline.run(ctx, pipeline_cfg)
+    ctx.metrics["modality"] = modality
+    ctx.summary_row["modality"] = modality
+    return ctx
+
+
 def run_array(
     runtime: AppRuntime,
     *,
@@ -298,20 +332,30 @@ def run_array(
     source_path: str | Path,
     meta: dict[str, Any] | None = None,
 ) -> RunContext:
-    adapted_image, adapted_meta = adapt_image_for_modality(
-        image,
-        meta,
-        modality=runtime.options.modality,
-        projection=runtime.options.modality_projection,
-        channel_index=runtime.options.modality_channel_index,
-        slab_start=runtime.options.modality_slab_start,
-        slab_end=runtime.options.modality_slab_end,
+    return _run_with_cfg(
+        runtime,
+        image=image,
+        source_path=source_path,
+        meta=meta,
     )
-    ctx = RunContext(path=Path(source_path), image=adapted_image, meta=adapted_meta or {})
-    ctx = runtime.pipeline.run(ctx, dict(runtime.pipeline_cfg))
-    ctx.metrics["modality"] = runtime.options.modality
-    ctx.summary_row["modality"] = runtime.options.modality
-    return ctx
+
+
+def run_one_image(
+    runtime: AppRuntime,
+    *,
+    image_path: str | Path,
+    modality_override: str | None = None,
+    pipeline_cfg_overrides: dict[str, Any] | None = None,
+) -> RunContext:
+    image, meta = load_any_image(str(image_path))
+    return _run_with_cfg(
+        runtime,
+        image=image,
+        source_path=image_path,
+        meta=meta,
+        modality_override=modality_override,
+        pipeline_cfg_overrides=pipeline_cfg_overrides,
+    )
 
 
 def summarize_context(ctx: RunContext) -> str:

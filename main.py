@@ -10,6 +10,7 @@ from datetime import datetime
 from importlib import metadata
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import torch
 
@@ -86,6 +87,7 @@ from src.track import (
     build_longitudinal_tracking_outputs,
 )
 from src.uncertainty_io import save_float_map
+from src.run_service import RuntimeOptions, build_runtime, run_one_image
 from src.validation import (
     build_validation_table,
     save_agreement_scatter_plot,
@@ -96,6 +98,17 @@ from src.validation import (
 
 def _output_stem(filepath: str | Path) -> str:
     return Path(filepath).name.rsplit(".", 1)[0]
+
+
+def _discover_image_paths(folder_path: str) -> list[str]:
+    suffixes = (".tif", ".tiff", ".ome.tif", ".ome.tiff", ".png", ".jpg", ".jpeg", ".zarr")
+    found: list[str] = []
+    for root, _, files in os.walk(folder_path):
+        for fname in files:
+            low = fname.lower()
+            if low.endswith(suffixes):
+                found.append(os.path.join(root, fname))
+    return sorted(found)
 
 
 def _resolve_focus_mode(args: argparse.Namespace) -> str:
@@ -226,6 +239,42 @@ def _build_sample_cfg(
     return sample_cfg
 
 
+def _is_tracked_smoke_path(path: str | Path) -> bool:
+    normalized = str(path).replace("\\", "/")
+    return "examples/smoke_data/" in normalized
+
+
+def _collect_run_warnings(
+    sample_table: pd.DataFrame,
+    *,
+    validation_summary: pd.DataFrame | None = None,
+    mae_threshold: float = 1.0,
+) -> list[str]:
+    if sample_table.empty:
+        return []
+    warnings: list[str] = []
+    if "cell_count" in sample_table.columns and float(sample_table["cell_count"].fillna(0).sum()) == 0.0:
+        warnings.append("All samples have zero detected objects. This run is not scientifically interpretable.")
+    if {"cell_count", "rigorous_global_point_count"}.issubset(sample_table.columns):
+        mismatch = (sample_table["cell_count"].fillna(0).astype(float) > 0.0) & (
+            sample_table["rigorous_global_point_count"].fillna(0).astype(float) <= 0.0
+        )
+        if bool(mismatch.any()):
+            warnings.append("At least one sample has nonzero count but zero rigorous spatial points. Counting/spatial mismatch detected.")
+    if validation_summary is not None and not validation_summary.empty and "mae" in validation_summary.columns:
+        mae = float(validation_summary.iloc[0]["mae"])
+        if np.isfinite(mae) and mae > mae_threshold:
+            warnings.append(f"Manual benchmark failed acceptance threshold (MAE={mae:.3f} > {mae_threshold:.3f}).")
+    return warnings
+
+
+def _tracked_smoke_note(paths: list[str | Path]) -> str | None:
+    normalized = [str(path) for path in paths]
+    if normalized and all(_is_tracked_smoke_path(path) for path in normalized):
+        return "Tracked smoke inputs are smoke/demo regression fixtures only; they are not scientific count-validation data."
+    return None
+
+
 def _spatial_analysis_payload(args: argparse.Namespace, contexts: list[RunContext]) -> dict[str, object] | None:
     if not args.spatial_stats:
         return None
@@ -240,6 +289,62 @@ def _spatial_analysis_payload(args: argparse.Namespace, contexts: list[RunContex
         "random_seed": int(args.spatial_random_seed),
         "regionwise_analysis_run": False,
     }
+
+
+def _runtime_options_from_args(
+    args: argparse.Namespace,
+    *,
+    focus_mode: str,
+    use_gpu: bool,
+) -> RuntimeOptions:
+    return RuntimeOptions(
+        backend=args.backend or "cellpose",
+        diameter=args.diameter,
+        model_type=args.model_type,
+        cellpose_model=args.cellpose_model,
+        stardist_weights=args.stardist_weights,
+        model_alias=args.model_alias,
+        min_size=args.min_size,
+        max_size=args.max_size,
+        use_gpu=use_gpu,
+        modality=args.modality,
+        modality_projection=args.modality_projection,
+        modality_channel_index=args.modality_channel_index,
+        modality_slab_start=args.modality_slab_start,
+        modality_slab_end=args.modality_slab_end,
+        apply_clahe=args.apply_clahe,
+        focus_mode=focus_mode,
+        sam_checkpoint=args.sam_checkpoint,
+        phenotype_config=args.phenotype_config,
+        phenotype_engine=args.phenotype_engine,
+        atlas_subtype_priors=args.atlas_subtype_priors,
+        marker_metrics=args.marker_metrics,
+        interaction_metrics=args.interaction_metrics,
+        tta=args.tta,
+        tta_transforms=args.tta_transforms,
+        spatial_stats=args.spatial_stats,
+        spatial_mode=args.spatial_mode,
+        spatial_envelope_sims=args.spatial_envelope_sims,
+        spatial_random_seed=args.spatial_random_seed,
+        register_retina=args.register_retina,
+        region_schema=args.region_schema,
+        onh_mode=args.onh_mode,
+        onh_xy=tuple(args.onh_xy) if args.onh_xy is not None else None,
+        dorsal_xy=tuple(args.dorsal_xy) if args.dorsal_xy is not None else None,
+        retina_frame_path=args.retina_frame_path,
+        save_debug=args.save_debug,
+        save_ome_zarr=args.save_ome_zarr,
+        write_html_report=args.write_html_report,
+        write_object_table=args.write_object_table,
+        write_provenance=args.write_provenance,
+        write_uncertainty_maps=args.write_uncertainty_maps,
+        write_qc_maps=args.write_qc_maps,
+        strict_schemas=args.strict_schemas,
+        apply_edits=args.apply_edits,
+        tiling=args.tiling,
+        tile_size=args.tile_size,
+        tile_overlap=args.tile_overlap,
+    )
 
 
 def _run_pipeline_context(
@@ -697,10 +802,8 @@ def _run_manifest_contexts(
     *,
     args: argparse.Namespace,
     manifest_df: pd.DataFrame,
-    pipeline,
+    runtime,
     pipeline_cfg: dict[str, object],
-    use_gpu: bool,
-    focus_mode: str,
     output_root: Path | None,
     write_artifacts: bool,
 ) -> tuple[list[RunContext], list[tuple[str, str]], list[tuple[str, str]], list[dict[str, str]]]:
@@ -713,46 +816,37 @@ def _run_manifest_contexts(
         sample_id = str(row["sample_id"])
         print(f"[INFO] [STUDY] ({idx}/{len(manifest_df)}) {sample_id}")
         image_path = str(row["path"])
-        image, meta = load_any_image(image_path)
         modality = _resolve_modality(args, row)
-        image, meta = _adapt_loaded_image(image, meta, modality=modality, args=args)
         sample_cfg = _build_sample_cfg(
             pipeline_cfg,
             row,
             register_retina=args.register_retina,
             retina_frame_path=args.retina_frame_path,
         )
+        ctx = run_one_image(
+            runtime,
+            image_path=image_path,
+            modality_override=modality,
+            pipeline_cfg_overrides=sample_cfg,
+        )
 
         if write_artifacts:
             assert output_root is not None
             sample_output_dir = output_root / "samples" / sample_id
             sample_output_dir.mkdir(parents=True, exist_ok=True)
-            ctx = _process_single_image(
+            _write_context_artifacts(
+                ctx=ctx,
                 filepath=image_path,
-                image=image,
-                meta=meta,
-                pipeline=pipeline,
-                pipeline_cfg=sample_cfg,
-                args=args,
                 output_dir=sample_output_dir,
                 report_root=output_root,
-                use_gpu=use_gpu,
-                focus_mode=focus_mode,
+                args=args,
+                use_gpu=runtime.use_gpu,
+                focus_mode=runtime.options.focus_mode,
                 saved_images_for_report=saved_images_for_report,
                 report_assets=report_assets,
                 report_tables=report_tables,
             )
-        else:
-            ctx = _run_pipeline_context(
-                filepath=image_path,
-                image=image,
-                meta=meta,
-                pipeline=pipeline,
-                pipeline_cfg=sample_cfg,
-            )
 
-        ctx.metrics["modality"] = modality
-        ctx.summary_row["modality"] = modality
         processed_contexts.append(ctx)
         print(
             f"Processed {sample_id} | "
@@ -784,16 +878,7 @@ def _run_calibration_mode(
     *,
     args: argparse.Namespace,
     manifest_df: pd.DataFrame,
-    pipeline,
-    base_pipeline_cfg: dict[str, object],
-    focus_mode: str,
-    diameter: float | None,
-    model_type: str,
-    model_spec: dict[str, object],
-    min_size: int,
-    max_size: int,
-    use_gpu: bool,
-    backend: str,
+    runtime,
 ) -> None:
     if not args.manifest:
         raise ValueError("--calibration_grid requires --manifest.")
@@ -810,14 +895,12 @@ def _run_calibration_mode(
     for index, params in enumerate(calibration_spec["grid"], start=1):
         print(f"[INFO] [CALIBRATION] ({index}/{len(calibration_spec['grid'])}) {params}")
         normalized = _normalized_calibration_params(params, phenotype_engine=args.phenotype_engine)
-        candidate_cfg = apply_dotted_overrides(base_pipeline_cfg, normalized)
+        candidate_cfg = apply_dotted_overrides(runtime.pipeline_cfg, normalized)
         contexts, _, _, _ = _run_manifest_contexts(
             args=args,
             manifest_df=manifest_df,
-            pipeline=pipeline,
+            runtime=runtime,
             pipeline_cfg=candidate_cfg,
-            use_gpu=use_gpu,
-            focus_mode=focus_mode,
             output_root=None,
             write_artifacts=False,
         )
@@ -849,14 +932,12 @@ def _run_calibration_mode(
     write_best_params(calibration_root / "best_params.json", best_params)
 
     normalized_best = _normalized_calibration_params(best_params, phenotype_engine=args.phenotype_engine)
-    best_cfg = apply_dotted_overrides(base_pipeline_cfg, normalized_best)
+    best_cfg = apply_dotted_overrides(runtime.pipeline_cfg, normalized_best)
     contexts, _, _, _ = _run_manifest_contexts(
         args=args,
         manifest_df=manifest_df,
-        pipeline=pipeline,
+        runtime=runtime,
         pipeline_cfg=best_cfg,
-        use_gpu=use_gpu,
-        focus_mode=focus_mode,
         output_root=None,
         write_artifacts=False,
     )
@@ -882,17 +963,7 @@ def _run_calibration_mode(
     if not best_sample_table.empty:
         best_sample_table.to_csv(calibration_root / "best_sample_table.csv", index=False)
 
-    resolved_config = _resolved_config_dict(
-        args,
-        diameter=diameter,
-        model_type=model_type,
-        model_spec=model_spec,
-        min_size=min_size,
-        max_size=max_size,
-        use_gpu=use_gpu,
-        focus_mode=focus_mode,
-        backend=backend,
-    )
+    resolved_config = runtime.resolved_config
     write_html_report(
         str(calibration_root),
         {**resolved_config, "mode": "calibration"},
@@ -912,17 +983,7 @@ def _run_study_mode(
     *,
     args: argparse.Namespace,
     run_started_at: datetime,
-    segmenter,
-    pipeline,
-    pipeline_cfg: dict[str, object],
-    use_gpu: bool,
-    focus_mode: str,
-    diameter: float | None,
-    model_type: str,
-    model_spec: dict[str, object],
-    min_size: int,
-    max_size: int,
-    backend: str,
+    runtime,
 ) -> None:
     manifest_df = _merge_manual_annotations(load_manifest(args.manifest), args.manual_annotations)
     study_output_dir = Path(args.study_output_dir or args.output_dir)
@@ -932,10 +993,8 @@ def _run_study_mode(
     processed_contexts, saved_images_for_report, report_assets, manifest_report_tables = _run_manifest_contexts(
         args=args,
         manifest_df=manifest_df,
-        pipeline=pipeline,
-        pipeline_cfg=pipeline_cfg,
-        use_gpu=use_gpu,
-        focus_mode=focus_mode,
+        runtime=runtime,
+        pipeline_cfg=runtime.pipeline_cfg,
         output_root=study_output_dir,
         write_artifacts=True,
     )
@@ -1023,17 +1082,7 @@ def _run_study_mode(
     if phenotype_plot is not None:
         saved_images_for_report.append(("Phenotype composition", os.path.relpath(phenotype_plot, study_output_dir)))
 
-    resolved_config = _resolved_config_dict(
-        args,
-        diameter=diameter,
-        model_type=model_type,
-        model_spec=model_spec,
-        min_size=min_size,
-        max_size=max_size,
-        use_gpu=use_gpu,
-        focus_mode=focus_mode,
-        backend=backend,
-    )
+    resolved_config = runtime.resolved_config
     methods_appendix = build_methods_appendix(
         resolved_config=resolved_config,
         sample_table=sample_table,
@@ -1049,35 +1098,43 @@ def _run_study_mode(
         run_info = {
             "manifest": args.manifest,
             "study_output_dir": str(study_output_dir),
-            "backend": backend,
-            "model_label": model_spec.get("model_label"),
-            "model_source": model_spec.get("source"),
+            "backend": runtime.backend,
+            "model_label": runtime.model_spec.model_label,
+            "model_source": runtime.model_spec.source,
             "modality": args.modality,
-            "diameter": diameter,
-            "min_size": min_size,
-            "max_size": max_size,
-            "gpu": use_gpu,
-            "focus_mode": focus_mode,
+            "diameter": runtime.diameter,
+            "min_size": runtime.min_size,
+            "max_size": runtime.max_size,
+            "gpu": runtime.use_gpu,
+            "focus_mode": runtime.options.focus_mode,
             "tta": args.tta,
             "spatial_mode": args.spatial_mode if args.spatial_stats else "off",
             "stats_mode": args.stats_mode,
             "atlas_subtype_priors": args.atlas_subtype_priors,
             "tracking_mode": args.tracking_mode if args.track_longitudinal else "off",
         }
-        notes = f"Study mode with {len(sample_table)} samples."
+        notes_parts = [f"Study mode with {len(sample_table)} samples."]
         if stats_result.decision.get("warnings"):
-            notes += " Statistical warnings were recorded; inspect the decision artifact and provenance."
+            notes_parts.append("Statistical warnings were recorded; inspect the decision artifact and provenance.")
         warning_table = pd.DataFrame()
         if "warning_count" in sample_table.columns:
             warning_table = sample_table[sample_table["warning_count"].fillna(0).astype(int) > 0].copy()
         if not warning_table.empty:
-            notes += " Sample-level warnings were recorded; inspect the warning summary and provenance."
+            notes_parts.append("Sample-level warnings were recorded; inspect the warning summary and provenance.")
+        run_warnings = _collect_run_warnings(sample_table, validation_summary=validation_summary)
+        smoke_note = _tracked_smoke_note(sample_table["path"].tolist() if "path" in sample_table.columns else [])
+        if smoke_note:
+            notes_parts.append(smoke_note)
+        if run_warnings:
+            notes_parts.extend(run_warnings)
         extra_tables = []
         extra_tables.extend(manifest_report_tables)
         if not warning_table.empty:
             warning_columns = [column for column in ("sample_id", "warning_count", "warnings_text") if column in warning_table.columns]
             if warning_columns:
                 extra_tables.append({"title": "Warnings", "html": warning_table[warning_columns].to_html(index=False)})
+        if run_warnings:
+            extra_tables.append({"title": "Run Warnings", "html": pd.DataFrame({"warning": run_warnings}).to_html(index=False)})
         if not stats_decision_frame.empty:
             extra_tables.append({"title": "Statistics Decision", "html": stats_decision_frame.to_html(index=False)})
         if not stats_result.design_audit.empty:
@@ -1118,7 +1175,7 @@ def _run_study_mode(
             run_info,
             sample_table.to_dict("records"),
             saved_images_for_report,
-            notes=notes,
+            notes=" ".join(notes_parts),
             tables=extra_tables,
             methods_appendix=methods_appendix,
             assets=report_assets + tracking_assets + stats_assets + [("Methods appendix", os.path.relpath(methods_path, study_output_dir))],
@@ -1137,7 +1194,7 @@ def _run_study_mode(
             run_finished_at=datetime.now(),
             results_csv_path=study_summary_csv,
             study_statistics=stats_result.decision,
-            model_spec=model_spec,
+            model_spec=model_spec_to_dict(runtime.model_spec),
             spatial_analysis=_spatial_analysis_payload(args, processed_contexts),
             atlas_subtypes=_atlas_subtype_provenance_payload(args, processed_contexts),
             tracking=_tracking_provenance_payload(args, track_pair_qc),
@@ -1268,70 +1325,27 @@ def main():
     # Determine focus mode
     focus_mode = _resolve_focus_mode(args)
 
-    model_spec = resolve_model_spec(
-        backend=args.backend,
-        model_type=model_type,
-        cellpose_model=args.cellpose_model,
-        stardist_weights=args.stardist_weights,
-        sam_checkpoint=args.sam_checkpoint,
-        model_alias=args.model_alias,
-    )
-    backend = model_spec.backend
-    warning = model_warning(model_spec)
-    if warning:
-        print(f"[WARNING] {warning}")
-
-    segmenter = build_segmenter(
-        model_spec=model_spec,
-        diameter=diameter,
-        use_gpu=use_gpu,
-    )
-
     # Prepare outputs
     os.makedirs(args.output_dir, exist_ok=True)
-
-    # Load phenotype rules if requested
-    ph_rules, phenotype_engine_config = _load_phenotype_configs(args)
-    atlas_subtype_priors_config = _load_atlas_subtype_config(args)
 
     bbox_selector = None
     if focus_mode == "bbox":
         from manual_roi import select_bounding_box_napari
         bbox_selector = select_bounding_box_napari
-
-    pipeline_cfg = _build_pipeline_cfg(
-        args,
-        backend=backend,
-        model_spec=model_spec_to_dict(model_spec),
-        use_gpu=use_gpu,
-        min_size=min_size,
-        max_size=max_size,
-        phenotype_rules=ph_rules,
-        phenotype_engine_config=phenotype_engine_config,
-        atlas_subtype_priors_config=atlas_subtype_priors_config,
-    )
-    pipeline = build_default_pipeline(
-        segmenter,
-        phenotype_rules=ph_rules,
-        phenotype_engine_config=phenotype_engine_config,
+    runtime = build_runtime(
+        _runtime_options_from_args(args, focus_mode=focus_mode, use_gpu=use_gpu),
         bbox_selector=bbox_selector,
     )
+    warning = model_warning(runtime.model_spec)
+    if warning:
+        print(f"[WARNING] {warning}")
 
     if args.manifest and args.calibration_grid:
         manifest_df = _merge_manual_annotations(load_manifest(args.manifest), args.manual_annotations)
         _run_calibration_mode(
             args=args,
             manifest_df=manifest_df,
-            pipeline=pipeline,
-            base_pipeline_cfg=pipeline_cfg,
-            focus_mode=focus_mode,
-            diameter=diameter,
-            model_type=model_spec.model_type or model_type,
-            model_spec=model_spec_to_dict(model_spec),
-            min_size=min_size,
-            max_size=max_size,
-            use_gpu=use_gpu,
-            backend=backend,
+            runtime=runtime,
         )
         print("\nCalibration completed successfully.")
         return
@@ -1340,28 +1354,17 @@ def main():
         _run_study_mode(
             args=args,
             run_started_at=run_started_at,
-            segmenter=segmenter,
-            pipeline=pipeline,
-            pipeline_cfg=pipeline_cfg,
-            use_gpu=use_gpu,
-            focus_mode=focus_mode,
-            diameter=diameter,
-            model_type=model_spec.model_type or model_type,
-            model_spec=model_spec_to_dict(model_spec),
-            min_size=min_size,
-            max_size=max_size,
-            backend=backend,
+            runtime=runtime,
         )
         print("\nAll files processed successfully.")
         return
 
-    # Load images
-    image_list = utils.load_images_any(args.input_dir)
-    if not image_list:
+    image_paths = _discover_image_paths(args.input_dir)
+    if not image_paths:
         print(f"[ERROR] No images found in {args.input_dir}.")
         return
 
-    print(f"\n[INFO] Processing {len(image_list)} image(s) from {args.input_dir}")
+    print(f"\n[INFO] Processing {len(image_paths)} image(s) from {args.input_dir}")
 
     # Track rows for report and provenance
     rows = []
@@ -1370,27 +1373,27 @@ def main():
     report_tables: list[dict[str, str]] = []
     processed_contexts = []
 
-    for idx, (filepath, img, meta) in enumerate(image_list, start=1):
-        print(f"[INFO] ({idx}/{len(image_list)}) {os.path.basename(filepath)}")
+    for idx, filepath in enumerate(image_paths, start=1):
+        print(f"[INFO] ({idx}/{len(image_paths)}) {os.path.basename(filepath)}")
         modality = _resolve_modality(args)
-        img, meta = _adapt_loaded_image(img, meta, modality=modality, args=args)
-        ctx = _process_single_image(
+        ctx = run_one_image(
+            runtime,
+            image_path=filepath,
+            modality_override=modality,
+            pipeline_cfg_overrides=runtime.pipeline_cfg,
+        )
+        _write_context_artifacts(
+            ctx=ctx,
             filepath=filepath,
-            image=img,
-            meta=meta,
-            pipeline=pipeline,
-            pipeline_cfg=pipeline_cfg,
-            args=args,
             output_dir=args.output_dir,
             report_root=args.output_dir,
-            use_gpu=use_gpu,
-            focus_mode=focus_mode,
+            args=args,
+            use_gpu=runtime.use_gpu,
+            focus_mode=runtime.options.focus_mode,
             saved_images_for_report=saved_images_for_report,
             report_assets=report_assets,
             report_tables=report_tables,
         )
-        ctx.metrics["modality"] = modality
-        ctx.summary_row["modality"] = modality
         processed_contexts.append(ctx)
 
         # Collect row
@@ -1430,15 +1433,15 @@ def main():
         run_info = {
             "input_dir": args.input_dir,
             "output_dir": args.output_dir,
-            "backend": backend,
-            "model_label": model_spec.model_label,
-            "model_source": model_spec.source,
+            "backend": runtime.backend,
+            "model_label": runtime.model_spec.model_label,
+            "model_source": runtime.model_spec.source,
             "modality": args.modality,
-            "diameter": diameter,
-            "min_size": min_size,
-            "max_size": max_size,
-            "gpu": use_gpu,
-            "focus_mode": focus_mode,
+            "diameter": runtime.diameter,
+            "min_size": runtime.min_size,
+            "max_size": runtime.max_size,
+            "gpu": runtime.use_gpu,
+            "focus_mode": runtime.options.focus_mode,
             "tta": args.tta,
             "spatial_mode": args.spatial_mode if args.spatial_stats else "off",
             "atlas_subtype_priors": args.atlas_subtype_priors,
@@ -1446,13 +1449,20 @@ def main():
         extra_tables = []
         extra_tables.extend(report_tables)
         warning_rows = [row for row in rows if int(row.get("warning_count", 0) or 0) > 0]
-        notes = ""
+        notes_parts: list[str] = []
         if warning_rows:
             warning_frame = pd.DataFrame(warning_rows)
             warning_columns = [column for column in ("filename", "warning_count", "warnings_text") if column in warning_frame.columns]
             if warning_columns:
                 extra_tables.append({"title": "Warnings", "html": warning_frame[warning_columns].to_html(index=False)})
-            notes = "Sample-level warnings were recorded; inspect the warning summary and provenance."
+            notes_parts.append("Sample-level warnings were recorded; inspect the warning summary and provenance.")
+        run_warnings = _collect_run_warnings(pd.DataFrame(rows))
+        smoke_note = _tracked_smoke_note([ctx.path for ctx in processed_contexts])
+        if smoke_note:
+            notes_parts.append(smoke_note)
+        if run_warnings:
+            extra_tables.append({"title": "Run Warnings", "html": pd.DataFrame({"warning": run_warnings}).to_html(index=False)})
+            notes_parts.extend(run_warnings)
         if not atlas_summary.empty:
             extra_tables.append({"title": "Atlas Summary", "html": atlas_summary.to_html(index=False)})
         report_path = write_html_report(
@@ -1460,7 +1470,7 @@ def main():
             run_info,
             rows,
             saved_images_for_report,
-            notes=notes,
+            notes=" ".join(notes_parts),
             tables=extra_tables,
             assets=report_assets,
         )
@@ -1471,22 +1481,12 @@ def main():
     if args.write_provenance:
         provenance_payload = build_run_provenance(
             args=vars(args),
-            resolved_config=_resolved_config_dict(
-                args,
-                diameter=diameter,
-                model_type=model_spec.model_type or model_type,
-                model_spec=model_spec_to_dict(model_spec),
-                min_size=min_size,
-                max_size=max_size,
-                use_gpu=use_gpu,
-                focus_mode=focus_mode,
-                backend=backend,
-            ),
+            resolved_config=runtime.resolved_config,
             contexts=processed_contexts,
             run_started_at=run_started_at,
             run_finished_at=datetime.now(),
             results_csv_path=csv_path,
-            model_spec=model_spec_to_dict(model_spec),
+            model_spec=model_spec_to_dict(runtime.model_spec),
             spatial_analysis=_spatial_analysis_payload(args, processed_contexts),
             atlas_subtypes=_atlas_subtype_provenance_payload(args, processed_contexts),
         )

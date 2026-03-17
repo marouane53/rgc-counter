@@ -1,6 +1,7 @@
 # Examples
 
 This folder contains the tracked assets used by the public docs, smoke tests, and release validation.
+The `smoke_data/` TIFFs are smoke/demo regression fixtures, not a scientific benchmark.
 
 ## Researcher Workflow Assets
 
@@ -20,6 +21,9 @@ Use these with:
 Use this with:
 - [docs/paper-workflow.md](../docs/paper-workflow.md)
 - [docs/stats-designs.md](../docs/stats-designs.md)
+
+These manual counts are the tracked smoke/demo reference lane only.
+They should not be presented as matched-modality scientific validation data.
 
 ## Phenotype And Atlas Assets
 

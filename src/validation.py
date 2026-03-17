@@ -23,13 +23,28 @@ def build_validation_table(sample_table: pd.DataFrame) -> pd.DataFrame:
     for row in sample_table.to_dict("records"):
         manual_count = None
         source = None
-        if row.get("label_path"):
-            label_path = Path(str(row["label_path"]))
-            if label_path.exists():
-                manual_count = count_labels(label_path)
-                source = "label_path"
-        if manual_count is None and row.get("manual_count") is not None and not pd.isna(row.get("manual_count")):
-            manual_count = float(row["manual_count"])
+        label_count = None
+        declared_manual_count = None
+        label_path = row.get("label_path")
+        if label_path:
+            resolved_label_path = Path(str(label_path))
+            if resolved_label_path.exists():
+                label_count = float(count_labels(resolved_label_path))
+        if row.get("manual_count") is not None and not pd.isna(row.get("manual_count")):
+            declared_manual_count = float(row["manual_count"])
+
+        if label_count is not None and declared_manual_count is not None and abs(label_count - declared_manual_count) > 1e-6:
+            raise ValueError(
+                f"Conflicting references for {row.get('sample_id')}: "
+                f"label_path={int(label_count) if float(label_count).is_integer() else label_count}, "
+                f"manual_count={int(declared_manual_count) if float(declared_manual_count).is_integer() else declared_manual_count}"
+            )
+
+        if label_count is not None:
+            manual_count = label_count
+            source = "label_path"
+        elif declared_manual_count is not None:
+            manual_count = declared_manual_count
             source = "manual_count"
         if manual_count is None and row.get("expected_total_objects") is not None and not pd.isna(row.get("expected_total_objects")):
             manual_count = int(row["expected_total_objects"])

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 import tifffile
 
 from src.manifest import load_manifest
@@ -58,6 +59,25 @@ def test_validation_uses_manual_count_column_when_present():
 
     assert validation.loc[0, "manual_count"] == 9
     assert validation.loc[0, "validation_source"] == "manual_count"
+
+
+def test_validation_raises_on_conflicting_label_and_manual_count(tmp_path: Path):
+    labels = [[0, 1, 1], [0, 0, 2], [0, 0, 2]]
+    label_path = tmp_path / "labels.tif"
+    tifffile.imwrite(label_path, labels)
+    sample_table = pd.DataFrame(
+        [
+            {
+                "sample_id": "S1",
+                "cell_count": 3,
+                "label_path": str(label_path),
+                "manual_count": 3,
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="Conflicting references"):
+        build_validation_table(sample_table)
 
 
 def test_tracked_example_fixture_uses_manual_counts_for_study_benchmark():

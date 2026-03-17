@@ -154,6 +154,35 @@ def _points_in_mask(points_yx: np.ndarray, mask: np.ndarray) -> np.ndarray:
     return mask[ys, xs].astype(bool)
 
 
+def kept_object_table(object_table: pd.DataFrame) -> pd.DataFrame:
+    if object_table.empty:
+        return object_table.copy()
+    if "kept" not in object_table.columns:
+        return object_table.copy()
+    kept_mask = object_table["kept"].fillna(True).astype(bool)
+    return object_table.loc[kept_mask].copy()
+
+
+def rigorous_points_from_object_table(
+    object_table: pd.DataFrame,
+    *,
+    level: str,
+    axis: str | None = None,
+    label: str | None = None,
+) -> np.ndarray:
+    frame = kept_object_table(object_table)
+    if frame.empty:
+        return np.empty((0, 2), dtype=float)
+    if level == "global":
+        return frame[["centroid_y_px", "centroid_x_px"]].to_numpy(dtype=float)
+    if axis is None or label is None or axis not in frame.columns:
+        return np.empty((0, 2), dtype=float)
+    subset = frame.loc[frame[axis].astype(str) == str(label)]
+    if subset.empty:
+        return np.empty((0, 2), dtype=float)
+    return subset[["centroid_y_px", "centroid_x_px"]].to_numpy(dtype=float)
+
+
 def _sample_points_from_mask(mask: np.ndarray, count: int, seed: int) -> np.ndarray:
     ys, xs = np.where(mask)
     if len(xs) < count or count <= 0:
@@ -509,13 +538,12 @@ def build_spatial_domains(
 def analyze_rigorous_domain(
     domain: SpatialDomain,
     *,
-    all_points_yx: np.ndarray,
+    points_yx: np.ndarray,
     image_shape: tuple[int, int],
     radii_px: Sequence[float],
     simulation_count: int,
 ) -> RigorousSpatialResult:
-    point_mask = _points_in_mask(all_points_yx, domain.mask)
-    points = all_points_yx[point_mask]
+    points = np.asarray(points_yx, dtype=float)
     status = _domain_status(domain.mask, len(points))
     legacy_nn = nn_regularity_index(points)
     legacy_vd = voronoi_regulariry_index(points, image_shape)
@@ -595,10 +623,6 @@ def compute_rigorous_spatial_bundle(
     simulation_count: int = 999,
     base_seed: int = 1337,
 ) -> dict[str, Any]:
-    if object_table.empty:
-        points_yx = np.empty((0, 2), dtype=float)
-    else:
-        points_yx = object_table[["centroid_y_px", "centroid_x_px"]].to_numpy(dtype=float)
     resolved_um_per_px = float(um_per_px if um_per_px is not None else MICRONS_PER_PIXEL)
 
     domains = build_spatial_domains(
@@ -614,7 +638,12 @@ def compute_rigorous_spatial_bundle(
     results = [
         analyze_rigorous_domain(
             domain,
-            all_points_yx=points_yx,
+            points_yx=rigorous_points_from_object_table(
+                object_table,
+                level="global" if domain.analysis_level == "global" else "region",
+                axis=None if domain.analysis_level == "global" else domain.region_axis,
+                label=None if domain.analysis_level == "global" else domain.region_label,
+            ),
             image_shape=image_shape,
             radii_px=radii_px,
             simulation_count=simulation_count,

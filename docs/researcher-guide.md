@@ -31,6 +31,7 @@ Expected outputs:
 - `provenance.json`
 
 If you are testing quickly on the tracked examples, use the exact smoke command in [Paper Workflow](paper-workflow.md).
+Those tracked TIFFs are smoke/demo regression fixtures only; they are not the scientific count-validation benchmark.
 
 ## I have a cohort
 
@@ -61,6 +62,8 @@ What to inspect after the run:
 - per-sample `spatial/`, `objects/`, `regions/`, and `retina_frames/`
 
 For production analyses, omit `--spatial_envelope_sims 8` and use the default rigorous envelope budget.
+
+The tracked example assets under `examples/smoke_data/` are smoke/demo fixtures for release validation and report generation. Do not cite them as a matched-modality scientific benchmark.
 
 For the full reviewer-facing path, go to [Paper Workflow](paper-workflow.md).
 

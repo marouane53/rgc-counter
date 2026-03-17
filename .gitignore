@@ -8,6 +8,7 @@ Outputs_example_maps_fix/
 Outputs_model_eval/
 Outputs_model_eval_final/
 Outputs_model_eval_fix/
+Outputs_*_consistency*/
 paper_evidence/
 planning/
 test_subjects/

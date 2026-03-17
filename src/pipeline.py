@@ -28,8 +28,10 @@ from src.spatial import (
     compute_rigorous_spatial_bundle,
     centroids_from_masks,
     isodensity_map,
+    kept_object_table,
     nn_regularity_index,
     ripley_k,
+    rigorous_points_from_object_table,
     voronoi_regulariry_index,
 )
 from src.tiling import segment_tiled
@@ -82,6 +84,22 @@ def _append_warning(ctx: RunContext, message: str) -> None:
         ctx.warnings.append(message)
 
 
+def _count_labeled_objects(labels: np.ndarray | None) -> int:
+    if labels is None:
+        return 0
+    object_ids = np.unique(labels)
+    object_ids = object_ids[object_ids != 0]
+    return int(len(object_ids))
+
+
+def _set_object_flow_metrics(ctx: RunContext, **updates: int) -> None:
+    flow = dict(ctx.metrics.get("object_flow") or {})
+    for key, value in updates.items():
+        flow[key] = int(value)
+        ctx.summary_row[f"object_flow_{key}"] = int(value)
+    ctx.metrics["object_flow"] = flow
+
+
 def _update_measurements_and_summary(ctx: RunContext, cfg: dict[str, Any]) -> None:
     if ctx.labels is None or ctx.qc_mask is None:
         raise ValueError("Measurement refresh requires labels and qc_mask.")
@@ -102,6 +120,19 @@ def _update_measurements_and_summary(ctx: RunContext, cfg: dict[str, Any]) -> No
         ctx.object_table,
         ctx.labels,
         ctx.state.get("foreground_probability"),
+    )
+    kept = kept_object_table(ctx.object_table)
+    focus_overlap_positive = (
+        int((kept["focus_overlap_px"].fillna(0).astype(float) > 0).sum())
+        if not kept.empty and "focus_overlap_px" in kept.columns
+        else 0
+    )
+    _set_object_flow_metrics(
+        ctx,
+        n_labels_postprocess=_count_labeled_objects(ctx.labels),
+        n_objects_object_table=len(ctx.object_table),
+        n_objects_kept=len(kept),
+        n_objects_focus_overlap_gt0=focus_overlap_positive,
     )
 
     ctx.summary_row["filename"] = ctx.path.name
@@ -241,6 +272,7 @@ class SegmentationStage:
 
         label_dtype = np.uint32 if int(np.max(masks)) > np.iinfo(np.uint16).max else np.uint16
         ctx.labels = masks.astype(label_dtype, copy=False)
+        _set_object_flow_metrics(ctx, n_labels_raw=_count_labeled_objects(ctx.labels))
         ctx.seg_info = seg_info
         ctx.metrics["backend"] = seg_info.get("backend", cfg.get("backend", "unknown"))
         for key, value in _resolved_model_fields(ctx, cfg).items():
@@ -265,6 +297,7 @@ class PostprocessStage:
         if ctx.labels is None:
             raise ValueError("PostprocessStage requires ctx.labels.")
         ctx.labels = postprocess_masks(ctx.labels, cfg["min_size"], cfg["max_size"])
+        _set_object_flow_metrics(ctx, n_labels_postprocess=_count_labeled_objects(ctx.labels))
         return ctx
 
 
@@ -575,6 +608,17 @@ class SpatialStatsStage:
             ctx.state["rigorous_spatial"] = rigorous
             ctx.metrics["spatial_analysis"] = rigorous["spatial_analysis"]
             ctx.summary_row.update(rigorous["global_summary"])
+            spatial_input_points = rigorous_points_from_object_table(ctx.object_table, level="global")
+            global_point_count = int(rigorous["global_summary"].get("rigorous_global_point_count", 0))
+            _set_object_flow_metrics(
+                ctx,
+                n_points_spatial_input=len(spatial_input_points),
+                n_points_global_domain=global_point_count,
+            )
+            if int(ctx.metrics.get("cell_count", 0)) > 0 and global_point_count == 0:
+                message = "Counting/spatial mismatch detected: nonzero cell_count but zero rigorous global points."
+                _append_warning(ctx, message)
+                raise RuntimeError(message)
         return ctx
 
 

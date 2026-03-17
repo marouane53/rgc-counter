@@ -78,9 +78,15 @@ def test_canonical_tracked_example_workflow_runs(tmp_path: Path):
     assert (output_dir / "samples" / "EX01_OD" / "retina_frames").exists()
     assert "warning_count" in study_summary.columns
     assert "warnings_text" in study_summary.columns
+    assert "object_flow_n_points_global_domain" in study_summary.columns
+    assert "object_flow_n_objects_kept" in study_summary.columns
     assert all(payload["metrics"].get("image_shape") == [96, 96] for payload in image_payloads)
     assert all(payload["metrics"].get("retina_registration", {}).get("tissue_coverage_fraction", 0.0) > 0.0 for payload in image_payloads)
     assert any(int(payload["summary_row"].get("cell_count", 0)) > 0 for payload in image_payloads)
+    positive_rows = study_summary[study_summary["cell_count"].fillna(0).astype(int) > 0]
+    assert not positive_rows.empty
+    assert all(positive_rows["rigorous_global_point_count"].fillna(0).astype(int) > 0)
+    assert all(positive_rows["object_flow_n_points_global_domain"].fillna(0).astype(int) > 0)
 
 
 def test_registered_tracking_study_smoke_writes_pair_qc_and_report_sections(tmp_path: Path):
@@ -155,3 +161,23 @@ def test_registered_tracking_study_smoke_writes_pair_qc_and_report_sections(tmp_
     assert "Tracking Summary" in report_html
     assert "Tracking Pair QC" in report_html
     assert '"tracking_mode": "registered"' in provenance_json
+
+
+def test_count_spatial_audit_script_detects_mismatch(tmp_path: Path):
+    pd.DataFrame(
+        [
+            {"sample_id": "S1", "cell_count": 1, "rigorous_global_point_count": 0},
+            {"sample_id": "S2", "cell_count": 0, "rigorous_global_point_count": 0},
+        ]
+    ).to_csv(tmp_path / "study_summary.csv", index=False)
+
+    completed = subprocess.run(
+        [sys.executable, "scripts/audit_count_spatial_consistency.py", str(tmp_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "Counting/spatial" not in completed.stdout
+    assert "nonzero cell_count but zero rigorous_global_point_count" in completed.stdout
