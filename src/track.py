@@ -305,7 +305,7 @@ def build_longitudinal_tracking_outputs(
             sample_id = current["sample_id"]
             current_ctx = sample_to_ctx.get(str(sample_id))
             current_table = None
-            if current_ctx is not None and current_ctx.object_table is not None and not current_ctx.object_table.empty:
+            if current_ctx is not None and current_ctx.object_table is not None:
                 current_table = current_ctx.object_table.reset_index(drop=True).copy()
 
             if current_table is None:
@@ -512,7 +512,33 @@ def summarize_tracks(
     tracking_mode_requested: str = "centroid",
 ) -> pd.DataFrame:
     if track_table.empty:
-        return pd.DataFrame()
+        if pair_qc is None or pair_qc.empty:
+            return pd.DataFrame()
+        rows: list[dict[str, object]] = []
+        for key, qc_group in pair_qc.groupby(["animal_id", "eye"], dropna=False):
+            animal_id, eye = key
+            rows.append(
+                {
+                    "animal_id": animal_id,
+                    "eye": eye,
+                    "tracking_mode_requested": tracking_mode_requested,
+                    "n_tracks": 0,
+                    "n_observations": 0,
+                    "n_pairs": int(len(qc_group)),
+                    "n_pairs_registered": int((qc_group.get("tracking_mode_used", pd.Series(dtype=object)) == "registered").sum()),
+                    "n_pairs_fallback": int(
+                        (
+                            (qc_group.get("tracking_mode_requested", pd.Series(dtype=object)) == "registered")
+                            & qc_group.get("registration_status", pd.Series(dtype=object)).astype(str).str.startswith("fallback")
+                        ).sum()
+                    ),
+                    "matched_fraction_mean": float(qc_group["matched_fraction"].dropna().mean()) if not qc_group.empty else np.nan,
+                    "mean_displacement_px": np.nan,
+                    "mean_raw_displacement_px": np.nan,
+                    "mean_registered_displacement_px": np.nan,
+                }
+            )
+        return pd.DataFrame(rows)
 
     frame = track_table.copy()
     grouped = frame.groupby(["animal_id", "eye"], dropna=False)

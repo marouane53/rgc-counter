@@ -77,6 +77,11 @@ def _resolved_model_fields(ctx: RunContext, cfg: dict[str, Any]) -> dict[str, An
     return model_fields
 
 
+def _append_warning(ctx: RunContext, message: str) -> None:
+    if message not in ctx.warnings:
+        ctx.warnings.append(message)
+
+
 def _update_measurements_and_summary(ctx: RunContext, cfg: dict[str, Any]) -> None:
     if ctx.labels is None or ctx.qc_mask is None:
         raise ValueError("Measurement refresh requires labels and qc_mask.")
@@ -121,6 +126,8 @@ class PrepareImageStage:
         ctx.gray = gray
         ctx.metrics["image_shape"] = list(gray.shape)
         ctx.metrics["image_dtype"] = str(gray.dtype)
+        if any(int(dim) <= 1 for dim in gray.shape):
+            _append_warning(ctx, f"Degenerate grayscale shape detected: {tuple(int(dim) for dim in gray.shape)}")
         return ctx
 
 
@@ -440,6 +447,11 @@ class RetinaRegistrationStage:
         ctx.summary_row["retina_registered"] = True
         ctx.summary_row["region_schema"] = cfg.get("region_schema", "mouse_flatmount_v1")
         ctx.summary_row["max_ecc_um"] = max_ecc_um
+        if float(frame.tissue_coverage_fraction) < 0.01:
+            _append_warning(
+                ctx,
+                f"Near-zero tissue coverage after retina registration: {float(frame.tissue_coverage_fraction):.6f}",
+            )
         return ctx
 
 
@@ -530,6 +542,11 @@ class SpatialStatsStage:
         ctx.summary_row.update(spatial)
 
         if cfg.get("spatial_mode", "legacy") == "rigorous":
+            if len(cents) < 3:
+                _append_warning(
+                    ctx,
+                    f"Rigorous spatial analysis requested with too few points: {int(len(cents))}",
+                )
             tissue_mask = build_tissue_mask(ctx.gray)
             um_per_px = None
             max_ecc_um = None

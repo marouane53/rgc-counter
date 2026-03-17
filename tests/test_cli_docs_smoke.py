@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -60,6 +61,10 @@ def test_canonical_tracked_example_workflow_runs(tmp_path: Path):
         check=True,
     )
 
+    study_summary = pd.read_csv(output_dir / "study_summary.csv")
+    provenance = json.loads((output_dir / "provenance.json").read_text(encoding="utf-8"))
+    image_payloads = provenance["images"]
+
     assert completed.returncode == 0
     assert (output_dir / "study_summary.csv").exists()
     assert (output_dir / "study_regions.csv").exists()
@@ -71,6 +76,11 @@ def test_canonical_tracked_example_workflow_runs(tmp_path: Path):
     assert (output_dir / "samples" / "EX01_OD" / "objects").exists()
     assert (output_dir / "samples" / "EX01_OD" / "regions").exists()
     assert (output_dir / "samples" / "EX01_OD" / "retina_frames").exists()
+    assert "warning_count" in study_summary.columns
+    assert "warnings_text" in study_summary.columns
+    assert all(payload["metrics"].get("image_shape") == [96, 96] for payload in image_payloads)
+    assert all(payload["metrics"].get("retina_registration", {}).get("tissue_coverage_fraction", 0.0) > 0.0 for payload in image_payloads)
+    assert any(int(payload["summary_row"].get("cell_count", 0)) > 0 for payload in image_payloads)
 
 
 def test_registered_tracking_study_smoke_writes_pair_qc_and_report_sections(tmp_path: Path):

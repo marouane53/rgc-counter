@@ -244,3 +244,25 @@ def test_write_tracking_outputs_writes_pair_qc_and_summary(tmp_path: Path):
     assert (tmp_path / "tracking" / "track_observations.csv").exists()
     assert (tmp_path / "tracking" / "track_pair_qc.csv").exists()
     assert (tmp_path / "tracking" / "track_summary.csv").exists()
+
+
+def test_write_tracking_outputs_still_writes_empty_bundle_when_no_objects(tmp_path: Path):
+    manifest = _make_manifest(["A0", "A7"], [0, 7])
+    ctx0 = _make_context("a0.tif", [])
+    ctx1 = _make_context("a7.tif", [])
+
+    track_table, pair_qc, summary, assets = _write_tracking_outputs(
+        manifest_df=manifest,
+        contexts=[ctx0, ctx1],
+        output_dir=tmp_path,
+        max_disp_px=10.0,
+        tracking_mode="registered",
+    )
+
+    assert track_table.empty
+    assert not pair_qc.empty
+    assert not summary.empty
+    assert len(assets) == 3
+    assert (tmp_path / "tracking" / "track_observations.csv").exists()
+    assert (tmp_path / "tracking" / "track_pair_qc.csv").exists()
+    assert (tmp_path / "tracking" / "track_summary.csv").exists()

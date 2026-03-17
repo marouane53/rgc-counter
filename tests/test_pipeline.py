@@ -189,6 +189,36 @@ def test_pipeline_populates_rigorous_spatial_outputs_when_enabled():
     assert {"global", "ring", "quadrant", "sector", "peripapillary_bin"}.issubset(set(summary["region_axis"]))
 
 
+def test_pipeline_warns_when_rigorous_spatial_has_too_few_points():
+    image = np.zeros((64, 64), dtype=np.uint16)
+    image[4:60, 4:60] = 200
+    labels = np.zeros((64, 64), dtype=np.uint16)
+    labels[8:14, 8:14] = 1
+    labels[40:46, 40:46] = 2
+
+    ctx = RunContext(path=Path("sample.tif"), image=image, meta={"reader": "test"})
+    pipeline = build_default_pipeline(FakeSegmenter(labels))
+    cfg = {
+        "apply_clahe": False,
+        "focus_mode": "none",
+        "tta": False,
+        "tta_transforms": None,
+        "min_size": 1,
+        "max_size": 1000,
+        "spatial_stats": True,
+        "spatial_mode": "rigorous",
+        "spatial_envelope_sims": 8,
+        "spatial_random_seed": 19,
+        "backend": "fake",
+        "use_gpu": False,
+        "register_retina": False,
+    }
+
+    out = pipeline.run(ctx, cfg)
+
+    assert any("too few points" in warning for warning in out.warnings)
+
+
 def test_pipeline_runs_atlas_subtype_priors_with_registration():
     image = np.zeros((32, 32, 2), dtype=np.uint8)
     image[4:10, 4:10, 0] = 220

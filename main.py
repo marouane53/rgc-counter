@@ -677,24 +677,19 @@ def _write_tracking_outputs(
         max_disp_px=max_disp_px,
         tracking_mode=tracking_mode,
     )
-    if track_table.empty:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), []
-
     track_dir = output_dir / "tracking"
     track_dir.mkdir(parents=True, exist_ok=True)
     track_observations_path = track_dir / "track_observations.csv"
     track_summary_path = track_dir / "track_summary.csv"
     track_pair_qc_path = track_dir / "track_pair_qc.csv"
     track_table.to_csv(track_observations_path, index=False)
-    if not track_pair_qc.empty:
-        track_pair_qc.to_csv(track_pair_qc_path, index=False)
-    if not track_summary.empty:
-        track_summary.to_csv(track_summary_path, index=False)
-    assets = [("Track observations", os.path.relpath(track_observations_path, output_dir))]
-    if not track_pair_qc.empty:
-        assets.append(("Tracking pair QC", os.path.relpath(track_pair_qc_path, output_dir)))
-    if not track_summary.empty:
-        assets.append(("Tracking summary", os.path.relpath(track_summary_path, output_dir)))
+    track_pair_qc.to_csv(track_pair_qc_path, index=False)
+    track_summary.to_csv(track_summary_path, index=False)
+    assets = [
+        ("Track observations", os.path.relpath(track_observations_path, output_dir)),
+        ("Tracking pair QC", os.path.relpath(track_pair_qc_path, output_dir)),
+        ("Tracking summary", os.path.relpath(track_summary_path, output_dir)),
+    ]
     return track_table, track_pair_qc, track_summary, assets
 
 
@@ -1072,8 +1067,17 @@ def _run_study_mode(
         notes = f"Study mode with {len(sample_table)} samples."
         if stats_result.decision.get("warnings"):
             notes += " Statistical warnings were recorded; inspect the decision artifact and provenance."
+        warning_table = pd.DataFrame()
+        if "warning_count" in sample_table.columns:
+            warning_table = sample_table[sample_table["warning_count"].fillna(0).astype(int) > 0].copy()
+        if not warning_table.empty:
+            notes += " Sample-level warnings were recorded; inspect the warning summary and provenance."
         extra_tables = []
         extra_tables.extend(manifest_report_tables)
+        if not warning_table.empty:
+            warning_columns = [column for column in ("sample_id", "warning_count", "warnings_text") if column in warning_table.columns]
+            if warning_columns:
+                extra_tables.append({"title": "Warnings", "html": warning_table[warning_columns].to_html(index=False)})
         if not stats_decision_frame.empty:
             extra_tables.append({"title": "Statistics Decision", "html": stats_decision_frame.to_html(index=False)})
         if not stats_result.design_audit.empty:
@@ -1391,6 +1395,8 @@ def main():
 
         # Collect row
         row = dict(ctx.summary_row)
+        row["warning_count"] = len(ctx.warnings)
+        row["warnings_text"] = "; ".join(ctx.warnings)
         rows.append(row)
 
         print(
@@ -1439,6 +1445,14 @@ def main():
         }
         extra_tables = []
         extra_tables.extend(report_tables)
+        warning_rows = [row for row in rows if int(row.get("warning_count", 0) or 0) > 0]
+        notes = ""
+        if warning_rows:
+            warning_frame = pd.DataFrame(warning_rows)
+            warning_columns = [column for column in ("filename", "warning_count", "warnings_text") if column in warning_frame.columns]
+            if warning_columns:
+                extra_tables.append({"title": "Warnings", "html": warning_frame[warning_columns].to_html(index=False)})
+            notes = "Sample-level warnings were recorded; inspect the warning summary and provenance."
         if not atlas_summary.empty:
             extra_tables.append({"title": "Atlas Summary", "html": atlas_summary.to_html(index=False)})
         report_path = write_html_report(
@@ -1446,7 +1460,7 @@ def main():
             run_info,
             rows,
             saved_images_for_report,
-            notes="",
+            notes=notes,
             tables=extra_tables,
             assets=report_assets,
         )

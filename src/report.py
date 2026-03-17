@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import datetime
 import os
+import shutil
+from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 import pandas as pd
 from jinja2 import Template
@@ -77,6 +81,86 @@ ul { padding-left: 18px; }
 </body>
 </html>
 """
+
+
+class _ReportReferenceParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.references: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for key, value in attrs:
+            if key in {"href", "src"} and value:
+                self.references.append(value)
+
+
+def _is_relative_report_reference(value: str) -> bool:
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        return False
+    if not parsed.path or parsed.path.startswith("/") or parsed.path.startswith("#"):
+        return False
+    return True
+
+
+def collect_report_relative_references(report_path: str | Path) -> list[str]:
+    report_path = Path(report_path)
+    parser = _ReportReferenceParser()
+    parser.feed(report_path.read_text(encoding="utf-8"))
+    seen: set[str] = set()
+    refs: list[str] = []
+    for ref in parser.references:
+        if not _is_relative_report_reference(ref):
+            continue
+        if ref in seen:
+            continue
+        seen.add(ref)
+        refs.append(ref)
+    return refs
+
+
+def find_missing_report_references(report_path: str | Path) -> list[str]:
+    report_path = Path(report_path)
+    source_root = report_path.parent.resolve()
+    missing: list[str] = []
+    for ref in collect_report_relative_references(report_path):
+        parsed = urlsplit(ref)
+        resolved = (source_root / parsed.path).resolve()
+        try:
+            resolved.relative_to(source_root)
+        except ValueError:
+            missing.append(ref)
+            continue
+        if not resolved.exists():
+            missing.append(ref)
+    return missing
+
+
+def copy_report_bundle(report_path: str | Path, destination_dir: str | Path) -> Path:
+    report_path = Path(report_path).resolve()
+    source_root = report_path.parent
+    destination_dir = Path(destination_dir)
+    if destination_dir.exists():
+        shutil.rmtree(destination_dir)
+    destination_dir.mkdir(parents=True, exist_ok=True)
+
+    destination_report = destination_dir / report_path.name
+    shutil.copy2(report_path, destination_report)
+
+    for ref in collect_report_relative_references(report_path):
+        parsed = urlsplit(ref)
+        source_asset = (source_root / parsed.path).resolve()
+        try:
+            relative_asset = source_asset.relative_to(source_root)
+        except ValueError as exc:
+            raise ValueError(f"Report reference escapes report root: {ref}") from exc
+        if not source_asset.exists():
+            raise FileNotFoundError(f"Missing report asset referenced by {report_path}: {ref}")
+        destination_asset = destination_dir / relative_asset
+        destination_asset.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_asset, destination_asset)
+
+    return destination_report
 
 
 def write_html_report(

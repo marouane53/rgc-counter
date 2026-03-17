@@ -60,32 +60,68 @@ def save_results_to_csv(results: List[Dict[str, Any]], output_csv_path: str) -> 
             writer.writerow(row)
 
 
+def _select_channel_last(image: np.ndarray, channel_index: int) -> np.ndarray:
+    n_channels = int(image.shape[-1])
+    if channel_index < 0 or channel_index >= n_channels:
+        raise IndexError(f"channel_index {channel_index} is out of range for trailing axis with {n_channels} channels")
+    return np.asarray(image[..., channel_index])
+
+
+def _select_channel_first(image: np.ndarray, channel_index: int) -> np.ndarray:
+    n_channels = int(image.shape[0])
+    if channel_index < 0 or channel_index >= n_channels:
+        raise IndexError(f"channel_index {channel_index} is out of range for leading axis with {n_channels} channels")
+    return np.asarray(image[channel_index, ...])
+
+
 def ensure_grayscale(image: np.ndarray, channel_index: int = 0) -> np.ndarray:
     """
-    If the image has multiple channels, extract the one we need.
-    If the image is already single-channel, just return it.
+    Canonicalize common microscopy layouts into a 2D grayscale array.
+
+    Supported layouts:
+    - YX
+    - YXC
+    - CYX
+    - ZYX
+    - ZYXC
+    - CZYX
+
+    Singleton dimensions are squeezed when they originate from 3D/4D layouts.
     """
-    if image.ndim == 2:
-        return image
-    elif image.ndim == 3:
-        # Assume last dim is channels
-        if image.shape[-1] < 10:
-            return image[..., channel_index]
+    raw = np.asarray(image)
+    if raw.ndim == 2:
+        gray = raw
+    elif raw.ndim == 3:
+        squeezed = np.squeeze(raw)
+        if squeezed.ndim == 2:
+            gray = squeezed
+        elif raw.shape[-1] <= 4:
+            gray = _select_channel_last(raw, channel_index)
+        elif raw.shape[0] <= 4:
+            gray = _select_channel_first(raw, channel_index)
         else:
-            # Channels-first or Z dimension present; pick best guess
-            return image[channel_index, ...]
-    elif image.ndim == 4:
-        # Z, Y, X, C or Y, X, Z, C. We try to take a max projection on Z then channel.
-        # We assume last dimension is channels when small (<10)
-        if image.shape[-1] < 10:
-            # max project Z
-            proj = image.max(axis=-2) if image.shape[-2] > 1 else image[..., 0, :]
-            return proj[..., channel_index]
+            gray = np.max(raw, axis=0)
+    elif raw.ndim == 4:
+        squeezed = np.squeeze(raw)
+        if squeezed.ndim == 2:
+            gray = squeezed
+        elif raw.shape[-1] <= 4:
+            if raw.shape[0] == 1:
+                gray = _select_channel_last(np.squeeze(raw, axis=0), channel_index)
+            else:
+                gray = _select_channel_last(np.max(raw, axis=0), channel_index)
+        elif raw.shape[0] <= 4:
+            channel_view = _select_channel_first(raw, channel_index)
+            gray = np.max(channel_view, axis=0) if channel_view.ndim == 3 else channel_view
         else:
-            # fallback: take first slice/channel
-            return image[0, ..., 0]
+            raise ValueError(f"Unexpected image dimensions: {raw.shape}")
     else:
-        raise ValueError(f"Unexpected image dimensions: {image.shape}")
+        raise ValueError(f"Unexpected image dimensions: {raw.shape}")
+
+    gray = np.asarray(gray)
+    if gray.ndim != 2:
+        raise ValueError(f"Unexpected grayscale shape {gray.shape} derived from input {raw.shape}")
+    return gray
 
 def image_is_multichannel(image: np.ndarray) -> bool:
     return image.ndim >= 3 and (image.shape[-1] < 32 and image.shape[-1] > 1)

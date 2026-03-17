@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 import tifffile
 
+from src.manifest import load_manifest
 from src.validation import build_validation_table, summarize_validation
 
 
@@ -57,3 +58,16 @@ def test_validation_uses_manual_count_column_when_present():
 
     assert validation.loc[0, "manual_count"] == 9
     assert validation.loc[0, "validation_source"] == "manual_count"
+
+
+def test_tracked_example_fixture_uses_manual_counts_for_study_benchmark():
+    root = Path(__file__).resolve().parents[1]
+    manifest = load_manifest(root / "examples" / "manifests" / "example_study_manifest.csv")
+    manual = pd.read_csv(root / "examples" / "manual_annotations" / "example_manual_annotations.csv")
+    sample_table = manifest.merge(manual, on="sample_id", how="left")
+    sample_table["cell_count"] = [1, 0]
+
+    validation = build_validation_table(sample_table)
+
+    assert "label_path" not in sample_table.columns
+    assert set(validation["validation_source"]) == {"manual_count"}

@@ -25,12 +25,15 @@ def test_build_sample_table_merges_manifest_and_context():
     ctx = RunContext(path=Path("/tmp/sample.tif"), image=None, meta={})  # type: ignore[arg-type]
     ctx.summary_row = {"filename": "sample.tif", "cell_count": 10}
     ctx.artifacts["object_table"] = Path("/tmp/objects.parquet")
+    ctx.warnings = ["Near-zero tissue coverage after retina registration: 0.000000"]
 
     out = build_sample_table(manifest, [ctx])
 
     assert out.loc[0, "sample_id"] == "S1"
     assert out.loc[0, "cell_count"] == 10
     assert out.loc[0, "artifact_object_table"] == "/tmp/objects.parquet"
+    assert out.loc[0, "warning_count"] == 1
+    assert "Near-zero tissue coverage" in out.loc[0, "warnings_text"]
 
 
 def test_build_study_region_table_adds_manifest_metadata():

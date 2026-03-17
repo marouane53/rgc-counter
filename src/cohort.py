@@ -19,6 +19,7 @@ def build_sample_table(manifest_df: pd.DataFrame, contexts: list[RunContext]) ->
         for key, value in ctx.artifacts.items():
             row[f"artifact_{key}"] = str(value)
         row["warning_count"] = len(ctx.warnings)
+        row["warnings_text"] = "; ".join(ctx.warnings)
         if "phenotype_counts" in ctx.metrics:
             for phenotype, count in ctx.metrics["phenotype_counts"].items():
                 row[f"phenotype_count_{phenotype}"] = count

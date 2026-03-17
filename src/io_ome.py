@@ -6,6 +6,18 @@ from typing import Tuple, Dict, Any, Optional
 
 import numpy as np
 
+
+def _shape_list(shape: tuple[int, ...] | list[int]) -> list[int]:
+    return [int(dim) for dim in shape]
+
+
+def _normalize_loaded_array(array: np.ndarray) -> np.ndarray:
+    arr = np.asarray(array)
+    arr = np.squeeze(arr)
+    if arr.ndim == 3 and arr.shape[-1] == 1:
+        arr = arr[..., 0]
+    return arr
+
 def is_ome_tiff(path: str) -> bool:
     lower = path.lower()
     return lower.endswith(".ome.tif") or lower.endswith(".ome.tiff")
@@ -19,12 +31,25 @@ def load_any_image(path: str) -> Tuple[np.ndarray, Dict[str, Any]]:
     If multi-dimensional, it tries to squeeze singleton dims and leave (Y, X, C) or (Z, Y, X, C).
     """
     meta: Dict[str, Any] = {"path": path}
+    lower = path.lower()
+    if lower.endswith((".jpg", ".jpeg", ".png")):
+        from PIL import Image
+
+        with Image.open(path) as img:
+            arr = np.asarray(img)
+        meta["reader"] = "pillow"
+        meta["reader_raw_shape"] = _shape_list(arr.shape)
+        meta["canonical_loaded_shape"] = _shape_list(_normalize_loaded_array(arr).shape)
+        return arr, meta
+
     try:
         from aicsimageio import AICSImage
         img = AICSImage(path)
         meta["reader"] = "aicsimageio"
         # Get data in standard order (TCZYX)
         data = img.get_image_data("CZYX")  # channels-first for 2D/3D
+        meta["aics_requested_dims"] = "CZYX"
+        meta["aics_raw_shape"] = _shape_list(np.asarray(data).shape)
         # Move channels last if more convenient
         if data.ndim == 4:
             # C, Z, Y, X -> Z, Y, X, C
@@ -33,17 +58,19 @@ def load_any_image(path: str) -> Tuple[np.ndarray, Dict[str, Any]]:
             # C, Y, X -> Y, X, C
             data = np.moveaxis(data, 0, -1)
 
-        # If single-channel, return 2D
-        if data.ndim == 3 and data.shape[-1] == 1:
-            data = data[..., 0]
+        data = _normalize_loaded_array(data)
+        meta["canonical_loaded_shape"] = _shape_list(data.shape)
 
         # Pull pixel size if present
         try:
-            mpp_x = img.get_physical_pixel_size_x()
-            mpp_y = img.get_physical_pixel_size_y()
-            if mpp_x and mpp_y:
-                meta["microns_per_pixel_x"] = float(mpp_x)
-                meta["microns_per_pixel_y"] = float(mpp_y)
+            pixel_sizes = getattr(img, "physical_pixel_sizes", None)
+            if pixel_sizes is not None:
+                if getattr(pixel_sizes, "X", None) is not None:
+                    meta["microns_per_pixel_x"] = float(pixel_sizes.X)
+                if getattr(pixel_sizes, "Y", None) is not None:
+                    meta["microns_per_pixel_y"] = float(pixel_sizes.Y)
+                if getattr(pixel_sizes, "Z", None) is not None:
+                    meta["microns_per_pixel_z"] = float(pixel_sizes.Z)
         except Exception:
             pass
 
@@ -52,8 +79,12 @@ def load_any_image(path: str) -> Tuple[np.ndarray, Dict[str, Any]]:
         # Fallback to tifffile for standard microscopy formats first
         try:
             import tifffile
-            arr = tifffile.imread(path)
+
+            raw = tifffile.imread(path)
+            arr = _normalize_loaded_array(raw)
             meta["reader"] = "tifffile"
+            meta["reader_raw_shape"] = _shape_list(np.asarray(raw).shape)
+            meta["canonical_loaded_shape"] = _shape_list(arr.shape)
             return arr, meta
         except Exception:
             # Final fallback for common non-TIFF images used in smoke tests and reports
@@ -61,8 +92,11 @@ def load_any_image(path: str) -> Tuple[np.ndarray, Dict[str, Any]]:
                 from PIL import Image
 
                 with Image.open(path) as img:
-                    arr = np.asarray(img)
+                    raw = np.asarray(img)
+                    arr = _normalize_loaded_array(raw)
                 meta["reader"] = "pillow"
+                meta["reader_raw_shape"] = _shape_list(raw.shape)
+                meta["canonical_loaded_shape"] = _shape_list(arr.shape)
                 return arr, meta
             except Exception as e:
                 raise RuntimeError(f"Could not read image: {path}. Error: {e}") from e

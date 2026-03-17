@@ -76,19 +76,9 @@ pip install -r requirements-ui.txt
 pip install -r requirements-stardist.txt
 ```
 
-### After PyPI publication
+### PyPI publication
 
-```bash
-pip install retinal-phenotyper
-```
-
-Optional extras from the published package:
-
-```bash
-pip install "retinal-phenotyper[ui]"
-pip install "retinal-phenotyper[stardist]"
-pip install "retinal-phenotyper[ui,stardist]"
-```
+PyPI publication is pending. Until the package is published, install from a checkout using the editable or requirements-based paths above.
 
 Notes:
 - `requirements.txt` is the core CLI/runtime surface and intentionally excludes the napari UI stack and the StarDist stack.

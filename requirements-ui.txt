@@ -1,4 +1,4 @@
 -r requirements.txt
 napari==0.4.18
-pyqt5==5.15.9
+pyqt5==5.15.11
 qtpy

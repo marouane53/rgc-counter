@@ -18,6 +18,8 @@ python scripts/evaluate_models.py \
 
 The evaluation manifest supports one row per image/model run. Repeating the same image across different model rows is expected.
 
+These label TIFFs are model-evaluation fixtures only. They are not the canonical tracked-study benchmark for the two example retina TIFFs; the tracked-study benchmark uses `examples/manual_annotations/example_manual_annotations.csv`.
+
 ## Fine-Tune Cellpose
 
 ```bash

@@ -46,6 +46,12 @@ Expected artifacts:
 - `Outputs_example/report.html`
 - per-sample `spatial/`, `objects/`, `regions/`, and `retina_frames/`
 
+Correctness checks:
+- both tracked images stay `96x96` in study-mode provenance
+- tissue coverage is nonzero for both tracked images
+- at least one tracked image yields a nonzero count
+- `study_summary.csv` includes `warning_count` and `warnings_text`
+
 Single-image example bundle:
 
 ```bash
@@ -55,7 +61,8 @@ python main.py \
   --focus_qc \
   --tta \
   --register_retina \
-  --onh_mode auto_combined \
+  --onh_mode cli \
+  --onh_xy 48 48 \
   --dorsal_xy 48 14 \
   --write_object_table \
   --write_provenance \
@@ -74,6 +81,10 @@ python scripts/evaluate_models.py \
   --output_dir Outputs_model_eval \
   --no_gpu
 ```
+
+Reference-policy note:
+- `examples/manual_annotations/example_manual_annotations.csv` is the canonical tracked-study benchmark reference.
+- `examples/models/model_manifest.example.csv` and its bundled label TIFFs are a separate model-evaluation fixture lane and must not be merged into the tracked-study benchmark claim.
 
 ## Real-Data Smoke Notes
 
