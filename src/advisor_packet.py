@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +31,40 @@ PYTEST_PATTERNS = [
     re.compile(r"passed with\s+(\d+)\s+tests"),
     re.compile(r"(\d+)\s+tests"),
 ]
+
+
+class _SimpleHTMLTableParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.tables: list[list[list[str]]] = []
+        self._current_table: list[list[str]] | None = None
+        self._current_row: list[str] | None = None
+        self._current_cell: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "table":
+            self._current_table = []
+        elif tag == "tr" and self._current_table is not None:
+            self._current_row = []
+        elif tag in {"th", "td"} and self._current_row is not None:
+            self._current_cell = []
+
+    def handle_data(self, data: str) -> None:
+        if self._current_cell is not None:
+            self._current_cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"th", "td"} and self._current_row is not None and self._current_cell is not None:
+            self._current_row.append(unescape("".join(self._current_cell).strip()))
+            self._current_cell = None
+        elif tag == "tr" and self._current_table is not None and self._current_row is not None:
+            if any(cell for cell in self._current_row):
+                self._current_table.append(self._current_row)
+            self._current_row = None
+        elif tag == "table" and self._current_table is not None:
+            if self._current_table:
+                self.tables.append(self._current_table)
+            self._current_table = None
 
 
 def file_sha256(path: str | Path) -> str:
@@ -62,6 +98,22 @@ def extract_pytest_count(text: str) -> int | None:
         if match:
             return int(match.group(1))
     return None
+
+
+def read_html_tables(report_html: str | Path) -> list[pd.DataFrame]:
+    parser = _SimpleHTMLTableParser()
+    parser.feed(Path(report_html).read_text(encoding="utf-8"))
+    tables: list[pd.DataFrame] = []
+    for rows in parser.tables:
+        if not rows:
+            continue
+        header = rows[0]
+        body = rows[1:] if len(rows) > 1 else []
+        if body:
+            tables.append(pd.DataFrame(body, columns=header))
+        else:
+            tables.append(pd.DataFrame(columns=header))
+    return tables
 
 
 def _normalize_scalar(value: Any) -> str:
@@ -98,7 +150,7 @@ def compare_csv_to_report(
     csv_path = Path(csv_path)
     report_html = Path(report_html)
     csv_frame = pd.read_csv(csv_path)
-    report_tables = pd.read_html(str(report_html))
+    report_tables = read_html_tables(report_html)
     if report_table_index >= len(report_tables):
         raise IndexError(f"Report table index {report_table_index} missing for {report_html}")
     report_frame = report_tables[report_table_index]
@@ -265,7 +317,7 @@ def build_tracked_lane_comparison_md(
     study_provenance = json.loads(Path(study_provenance_path).read_text(encoding="utf-8"))
     single_provenance = json.loads(Path(single_provenance_path).read_text(encoding="utf-8"))
     study_summary = pd.read_csv(study_summary_path)
-    single_summary = pd.read_html(str(single_report_path))[0]
+    single_summary = read_html_tables(single_report_path)[0]
 
     compare_keys = [
         "focus_mode",
