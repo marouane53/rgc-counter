@@ -23,12 +23,15 @@ def build_methods_appendix(
     lines.append("## Pipeline Configuration")
     lines.append("")
     lines.append(f"- Backend: `{resolved_config.get('backend')}`")
+    lines.append(f"- Segmentation preset: `{resolved_config.get('segmentation_preset')}`")
     lines.append(f"- Modality: `{resolved_config.get('modality')}`")
     lines.append(f"- Modality projection: `{resolved_config.get('modality_projection')}`")
     lines.append(f"- Focus mode: `{resolved_config.get('focus_mode')}`")
     lines.append(f"- GPU enabled: `{resolved_config.get('use_gpu')}`")
     lines.append(f"- Diameter override: `{resolved_config.get('diameter')}`")
     lines.append(f"- Size filter: min `{resolved_config.get('min_size')}`, max `{resolved_config.get('max_size')}`")
+    if resolved_config.get("object_filters"):
+        lines.append(f"- Object filters: `{resolved_config.get('object_filters')}`")
     lines.append(f"- TTA enabled: `{resolved_config.get('tta')}`")
     lines.append(f"- Spatial stats enabled: `{resolved_config.get('spatial_stats')}`")
     if resolved_config.get("spatial_stats"):
@@ -95,6 +98,7 @@ def build_methods_appendix(
         lines.append(f"- RMSE: `{row['rmse']:.3f}`")
         lines.append(f"- Pearson r: `{row['pearson_r']:.3f}`")
         lines.append(f"- ICC(2,1): `{row['icc_2_1']:.3f}`")
+        lines.append("- Validation note: these metrics are only scientifically meaningful when the reference set is matched-modality data.")
         lines.append("")
 
     if resolved_config.get("spatial_stats"):
@@ -106,6 +110,7 @@ def build_methods_appendix(
             lines.append("- Exact Voronoi polygons were clipped to the true tissue/registered domain geometry.")
             lines.append("- Ripley `L(r)` was estimated with border correction using domain-distance eligibility.")
             lines.append("- Pair-correlation `g(r)` was estimated from annulus counts under the same border-correction rule.")
+            lines.append("- Spatial domains without enough valid radii are reported as invalid rather than treated as successful runs.")
             lines.append(
                 f"- CSR envelopes used `{resolved_config.get('spatial_envelope_sims', 999)}` simulations "
                 f"with base seed `{resolved_config.get('spatial_random_seed', 1337)}`."

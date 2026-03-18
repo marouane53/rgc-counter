@@ -181,3 +181,48 @@ def test_count_spatial_audit_script_detects_mismatch(tmp_path: Path):
     assert completed.returncode == 1
     assert "Counting/spatial" not in completed.stdout
     assert "nonzero cell_count but zero rigorous_global_point_count" in completed.stdout
+
+
+def test_spatial_curve_audit_script_detects_all_nan_curves(tmp_path: Path):
+    spatial_dir = tmp_path / "spatial"
+    spatial_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(
+        [
+            {
+                "analysis_level": "global",
+                "region_axis": "global",
+                "region_label": "global",
+                "radius_px": 25.0,
+                "l_obs": float("nan"),
+                "g_obs": float("nan"),
+            },
+            {
+                "analysis_level": "global",
+                "region_axis": "global",
+                "region_label": "global",
+                "radius_px": 50.0,
+                "l_obs": float("nan"),
+                "g_obs": float("nan"),
+            },
+        ]
+    ).to_csv(spatial_dir / "demo_spatial_curves.csv", index=False)
+    pd.DataFrame(
+        [
+            {
+                "analysis_level": "global",
+                "region_axis": "global",
+                "region_label": "global",
+                "status": "ok",
+            }
+        ]
+    ).to_csv(spatial_dir / "demo_spatial_summary.csv", index=False)
+
+    completed = subprocess.run(
+        [sys.executable, "scripts/audit_spatial_curve_validity.py", str(tmp_path)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 1
+    assert "all_curves_nonfinite" in completed.stdout

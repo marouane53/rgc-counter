@@ -6,6 +6,7 @@ from shapely.geometry import Polygon
 from src.regions import assign_regions
 from src.retina_coords import register_cells, register_focus_mask_pixels, retina_frame_from_points
 from src.spatial import (
+    choose_valid_radii_px,
     compute_csr_envelopes,
     compute_rigorous_spatial_bundle,
     exact_voronoi_clip_area,
@@ -109,6 +110,7 @@ def test_compute_rigorous_bundle_uses_tissue_mask_for_global_domain():
         image_shape=tissue_mask.shape,
         tissue_mask=tissue_mask,
         um_per_px=1.0,
+        radii_px=[5.0, 10.0],
         simulation_count=8,
         base_seed=7,
     )
@@ -253,3 +255,38 @@ def test_compute_rigorous_bundle_marks_insufficient_point_domains():
     global_row = bundle["summary"].query("analysis_level == 'global'").iloc[0]
     assert global_row["status"] == "insufficient_points"
     assert np.isnan(global_row["l_global_p_value"])
+
+
+def test_choose_valid_radii_drops_impossible_radii():
+    tissue_mask = np.zeros((64, 64), dtype=bool)
+    tissue_mask[18:32, 8:56] = True
+    points = np.asarray([[24.0, 16.0], [24.0, 24.0], [24.0, 32.0], [24.0, 40.0], [24.0, 48.0]], dtype=float)
+
+    payload = choose_valid_radii_px(points, tissue_mask, [3.0, 5.0, 10.0, 25.0])
+
+    assert payload["used_radii_px"] == [3.0, 5.0]
+    assert payload["status_reason"] == "ok"
+
+
+def test_domain_status_not_ok_when_all_curves_nan():
+    tissue_mask = np.zeros((64, 64), dtype=bool)
+    tissue_mask[28:34, 8:56] = True
+    points = np.asarray([[31.0, 12.0], [31.0, 20.0], [31.0, 28.0], [31.0, 36.0], [31.0, 44.0]], dtype=float)
+    object_table = _object_table_from_points(points)
+
+    bundle = compute_rigorous_spatial_bundle(
+        image_id="sample",
+        object_table=object_table,
+        image_shape=tissue_mask.shape,
+        tissue_mask=tissue_mask,
+        um_per_px=1.0,
+        radii_px=[25.0, 50.0, 75.0],
+        simulation_count=8,
+        base_seed=13,
+    )
+
+    global_row = bundle["summary"].query("analysis_level == 'global'").iloc[0]
+    assert global_row["status"] != "ok"
+    assert bool(global_row["spatial_curve_valid"]) is False
+    assert int(global_row["n_finite_l"]) == 0
+    assert int(global_row["n_finite_g"]) == 0

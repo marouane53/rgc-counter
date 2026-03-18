@@ -20,6 +20,9 @@ def test_build_object_table_collects_geometry_and_focus_metrics():
     assert frame.loc[0, "focus_overlap_fraction"] == 1.0
     assert frame.loc[1, "focus_overlap_px"] == 5
     assert frame.loc[0, "reader"] == "test"
+    assert "geometry.circularity" in frame.columns
+    assert "geometry.solidity" in frame.columns
+    assert "intensity.local_contrast" in frame.columns
 
 
 def test_write_object_table_creates_a_file(tmp_path: Path):

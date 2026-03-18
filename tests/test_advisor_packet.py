@@ -157,3 +157,35 @@ def test_build_tracked_lane_comparison_md_marks_single_image_as_qc_only(tmp_path
     assert "not count-comparable" in content
     assert "focus_mode" in content
     assert "focus_qc" in content
+
+
+def test_audit_advisor_packet_detects_incomplete_real_roi_export(tmp_path: Path):
+    packet_root = _build_minimal_packet(tmp_path)
+    pd.DataFrame([{"config_id": "winner"}]).to_csv(packet_root / "01_tables" / "real_roi_config_comparison.csv", index=False)
+
+    audit = audit_advisor_packet(packet_root)
+
+    assert audit["passed"] is False
+    assert any("Real ROI benchmark export is incomplete" in issue for issue in audit["issues"])
+
+
+def test_audit_advisor_packet_accepts_complete_real_roi_export(tmp_path: Path):
+    packet_root = _build_minimal_packet(tmp_path)
+    pd.DataFrame([{"config_id": "winner"}]).to_csv(packet_root / "01_tables" / "real_roi_config_comparison.csv", index=False)
+    pd.DataFrame(
+        [{"benchmark_kind": "roi_point_matching", "matched_modality": True, "n_rois": 24, "precision": 0.8, "recall": 0.8, "f1": 0.8, "mae": 1.0, "pass_threshold": True}]
+    ).to_csv(packet_root / "01_tables" / "real_roi_benchmark_quality.csv", index=False)
+    report_dir = packet_root / "03_reports" / "real_roi_benchmark"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    (report_dir / "benchmark_report.md").write_text(
+        "This benchmark passed the project acceptance threshold for one narrow use-case.\n",
+        encoding="utf-8",
+    )
+    run_manifest = json.loads((packet_root / "run_manifest.json").read_text(encoding="utf-8"))
+    run_manifest["export_hashes"] = export_hash_rows(packet_root)
+    (packet_root / "run_manifest.json").write_text(json.dumps(run_manifest, indent=2), encoding="utf-8")
+
+    audit = audit_advisor_packet(packet_root)
+
+    assert audit["passed"] is True
+    assert audit["real_roi_benchmark_valid"] is True

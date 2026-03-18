@@ -58,7 +58,7 @@ class RGCCounterDockWidget(QWidget):
         form = QFormLayout(config_box)
 
         self.backend_combo = QComboBox()
-        self.backend_combo.addItems(["cellpose", "stardist", "sam"])
+        self.backend_combo.addItems(["cellpose", "blob_watershed", "stardist", "sam"])
         self.modality_combo = QComboBox()
         self.modality_combo.addItems(["flatmount", "oct", "vis_octf", "lightsheet"])
         self.projection_combo = QComboBox()

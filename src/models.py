@@ -8,6 +8,7 @@ from typing import Tuple, Optional, Dict, Any
 
 import numpy as np
 
+from src.blob_watershed import segment_blob_watershed
 # We keep Cellpose as a dependable default
 from src.cell_segmentation import segment_cells_cellpose
 from src.model_registry import (
@@ -181,9 +182,36 @@ class SAMSegmenter(Segmenter):
         return labels, info
 
 
+class BlobWatershedSegmenter(Segmenter):
+    """Marker-based blob detector for sparse, bright soma-like objects."""
+
+    def __init__(self, model_spec: ModelSpec, config: dict[str, Any] | None = None):
+        self.model_spec = model_spec
+        self.config = dict(config or {})
+
+    def segment(self, image: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
+        labels, info = segment_blob_watershed(
+            image,
+            apply_clahe=bool(self.config.get("apply_clahe", False)),
+            min_sigma=float(self.config.get("min_sigma", 2.0)),
+            max_sigma=float(self.config.get("max_sigma", 6.0)),
+            num_sigma=int(self.config.get("num_sigma", 5)),
+            threshold_rel=float(self.config.get("threshold_rel", 0.15)),
+            min_distance=int(self.config.get("min_distance", 6)),
+            min_size=int(self.config.get("min_size", 20)),
+            max_size=int(self.config.get("max_size", 400)),
+            min_mean_intensity=float(self.config["min_mean_intensity"]) if self.config.get("min_mean_intensity") is not None else None,
+            compactness=float(self.config.get("compactness", 0.0)),
+        )
+        info.update(model_summary_fields(self.model_spec))
+        info["model_type"] = self.model_spec.model_type or "blob_watershed"
+        return labels.astype(np.uint16, copy=False), info
+
+
 def build_segmenter(model_spec: ModelSpec,
                     diameter: Optional[float],
-                    use_gpu: bool) -> Segmenter:
+                    use_gpu: bool,
+                    segmenter_config: dict[str, Any] | None = None) -> Segmenter:
     """
     Factory for segmenters.
     """
@@ -194,6 +222,8 @@ def build_segmenter(model_spec: ModelSpec,
         return StarDistSegmenter(model_spec=model_spec)
     elif backend == "sam":
         return SAMSegmenter(model_spec=model_spec, device="cuda" if use_gpu else "cpu")
+    elif backend == "blob_watershed":
+        return BlobWatershedSegmenter(model_spec=model_spec, config=segmenter_config)
     else:
         warnings.warn(f"Unknown backend '{backend}'. Falling back to Cellpose.")
         fallback_spec = ModelSpec(

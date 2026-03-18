@@ -26,6 +26,11 @@ TRACKED_FIGURE_MAPPINGS = [
         "03_reports/tracked_example_manual_validation/validation/bland_altman.png",
     ),
 ]
+REAL_ROI_BENCHMARK_FILES = [
+    "01_tables/real_roi_config_comparison.csv",
+    "01_tables/real_roi_benchmark_quality.csv",
+    "03_reports/real_roi_benchmark/benchmark_report.md",
+]
 PYTEST_PATTERNS = [
     re.compile(r"(\d+)\s+passed"),
     re.compile(r"passed with\s+(\d+)\s+tests"),
@@ -231,6 +236,31 @@ def _validate_repo_snapshot(packet_root: Path, run_manifest: dict[str, Any]) -> 
     return not issues, issues, "present"
 
 
+def _validate_real_roi_benchmark(packet_root: Path) -> tuple[bool, list[str]]:
+    present = [(packet_root / rel).exists() for rel in REAL_ROI_BENCHMARK_FILES]
+    if not any(present):
+        return True, []
+    issues: list[str] = []
+    for relative_path, exists in zip(REAL_ROI_BENCHMARK_FILES, present):
+        if not exists:
+            issues.append(f"Real ROI benchmark export is incomplete: missing {relative_path}")
+
+    quality_path = packet_root / "01_tables" / "real_roi_benchmark_quality.csv"
+    report_path = packet_root / "03_reports" / "real_roi_benchmark" / "benchmark_report.md"
+    if quality_path.exists() and report_path.exists():
+        try:
+            quality = pd.read_csv(quality_path)
+            if not quality.empty and "pass_threshold" in quality.columns:
+                pass_value = bool(quality.iloc[0]["pass_threshold"])
+                report_text = report_path.read_text(encoding="utf-8").lower()
+                expected_phrase = "passed the project acceptance threshold" if pass_value else "did not pass the project acceptance threshold"
+                if expected_phrase not in report_text:
+                    issues.append("Real ROI benchmark report/pass-threshold wording does not match the exported quality table.")
+        except Exception as exc:
+            issues.append(f"Real ROI benchmark validation failed: {exc}")
+    return not issues, issues
+
+
 def audit_advisor_packet(packet_root: str | Path) -> dict[str, Any]:
     packet_root = Path(packet_root)
     report_root = packet_root / "03_reports"
@@ -291,6 +321,8 @@ def audit_advisor_packet(packet_root: str | Path) -> dict[str, Any]:
 
     repo_snapshot_valid, repo_snapshot_issues, repo_snapshot_status = _validate_repo_snapshot(packet_root, run_manifest)
     issues.extend(repo_snapshot_issues)
+    real_roi_valid, real_roi_issues = _validate_real_roi_benchmark(packet_root)
+    issues.extend(real_roi_issues)
 
     return {
         "packet_root": str(packet_root),
@@ -303,6 +335,7 @@ def audit_advisor_packet(packet_root: str | Path) -> dict[str, Any]:
         "export_hashes_valid": export_hashes_valid,
         "repo_snapshot_valid": repo_snapshot_valid,
         "repo_snapshot_status": repo_snapshot_status,
+        "real_roi_benchmark_valid": real_roi_valid,
         "issues": issues,
         "passed": not issues,
     }

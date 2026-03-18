@@ -17,6 +17,7 @@ REQUIRED_MODEL_MANIFEST_COLUMNS = [
     "image_path",
     "label_path",
     "backend",
+    "segmentation_preset",
     "model_type",
     "cellpose_model",
     "stardist_weights",
@@ -175,6 +176,10 @@ def evaluate_model_manifest(
     runtime_builder: Callable[..., Any] = build_runtime,
     runtime_runner: Callable[..., Any] = run_array,
 ) -> tuple[pd.DataFrame, pd.DataFrame, dict[str, Any]]:
+    manifest_df = manifest_df.copy()
+    for column in REQUIRED_MODEL_MANIFEST_COLUMNS:
+        if column not in manifest_df.columns:
+            manifest_df[column] = pd.NA
     rows: list[dict[str, Any]] = []
 
     for item in manifest_df.to_dict("records"):
@@ -193,6 +198,7 @@ def evaluate_model_manifest(
         runtime = runtime_builder(
             RuntimeOptions(
                 backend=str(row["backend"]) if pd.notna(row["backend"]) else "cellpose",
+                segmentation_preset=str(row["segmentation_preset"]) if pd.notna(row["segmentation_preset"]) and str(row["segmentation_preset"]).strip() else None,
                 model_type=str(row["model_type"]) if pd.notna(row["model_type"]) and str(row["model_type"]).strip() else None,
                 cellpose_model=str(row["cellpose_model"]) if pd.notna(row["cellpose_model"]) and str(row["cellpose_model"]).strip() else None,
                 stardist_weights=str(row["stardist_weights"]) if pd.notna(row["stardist_weights"]) and str(row["stardist_weights"]).strip() else None,

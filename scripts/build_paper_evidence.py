@@ -1889,6 +1889,7 @@ def export_advisor_packet(
     summary_state: dict[str, Any],
     *,
     packet_root: Path,
+    roi_benchmark_dir: Path | None = None,
 ) -> dict[str, Any]:
     if packet_root.exists():
         remove_path(packet_root)
@@ -1930,6 +1931,37 @@ def export_advisor_packet(
         if source_path.exists():
             copy_file(source_path, packet_root / "02_images" / destination_name)
 
+    real_roi_exported = False
+    if roi_benchmark_dir is not None:
+        roi_benchmark_dir = Path(roi_benchmark_dir)
+        comparison_path = roi_benchmark_dir / "results" / "config_comparison.csv"
+        best_path = roi_benchmark_dir / "results" / "best_config.json"
+        quality_path = roi_benchmark_dir / "report" / "benchmark_quality.csv"
+        report_path = roi_benchmark_dir / "report" / "benchmark_report.md"
+        if comparison_path.exists() and best_path.exists() and quality_path.exists() and report_path.exists():
+            copy_file(comparison_path, packet_root / "01_tables" / "real_roi_config_comparison.csv")
+            copy_file(best_path, packet_root / "01_tables" / "real_roi_best_config.json")
+            copy_file(quality_path, packet_root / "01_tables" / "real_roi_benchmark_quality.csv")
+            copy_file(report_path, packet_root / "03_reports" / "real_roi_benchmark" / "benchmark_report.md")
+            for index, overlay_path in enumerate(sorted((roi_benchmark_dir / "results" / "overlays").glob("*.png"))[:3], start=1):
+                copy_file(overlay_path, packet_root / "02_images" / f"real_roi_best_overlay_{index}.png")
+            real_roi_exported = True
+
+    if not real_roi_exported:
+        source_review_root = evidence_root / "09_real_roi_benchmark"
+        licenses_path = source_review_root / "licenses_and_sources.md"
+        shortfall_path = source_review_root / "report" / "source_shortfall.md"
+        source_qc_csv = source_review_root / "report" / "source_qc.csv"
+        source_qc_md = source_review_root / "report" / "source_qc.md"
+        if licenses_path.exists():
+            copy_file(licenses_path, packet_root / "00_summary" / "real_roi_licenses_and_sources.md")
+        if shortfall_path.exists():
+            copy_file(shortfall_path, packet_root / "03_reports" / "real_roi_benchmark" / "source_shortfall.md")
+        if source_qc_csv.exists():
+            copy_file(source_qc_csv, packet_root / "01_tables" / "real_roi_source_qc.csv")
+        if source_qc_md.exists():
+            copy_file(source_qc_md, packet_root / "03_reports" / "real_roi_benchmark" / "source_qc.md")
+
     tracked_lane_md = build_tracked_lane_comparison_md(
         evidence_root / "07_report_artifacts" / "provenance_json" / "tracked_example.json",
         evidence_root / "07_report_artifacts" / "provenance_json" / "tracked_example_single_image.json",
@@ -1955,6 +1987,19 @@ def export_advisor_packet(
             """
         ),
     )
+    if real_roi_exported:
+        with (packet_root / "README.md").open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\nReal ROI benchmark artifacts are included under `01_tables/real_roi_*`, "
+                "`02_images/real_roi_best_overlay_*.png`, and `03_reports/real_roi_benchmark/benchmark_report.md`.\n"
+            )
+    elif (packet_root / "03_reports" / "real_roi_benchmark" / "source_shortfall.md").exists():
+        with (packet_root / "README.md").open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\nNo benchmark-ready public matched-modality ROI dataset passed source review in this pass. "
+                "See `00_summary/real_roi_licenses_and_sources.md` and "
+                "`03_reports/real_roi_benchmark/source_shortfall.md`.\n"
+            )
 
     repo_snapshot_path = build_repo_snapshot(ROOT / "codebase" / "retinal-phenotyper.txt")
     packet_snapshot_path: Path | None = None
@@ -2024,6 +2069,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build the local-only paper evidence bundle.")
     parser.add_argument("--evidence-root", type=Path, default=ROOT / "paper_evidence")
     parser.add_argument("--advisor-packet-dir", type=Path, default=None)
+    parser.add_argument("--roi-benchmark-dir", type=Path, default=None, help="Optional Outputs_roi_benchmark_suite directory")
     parser.add_argument("--stop-after-phase-a", action="store_true", help="Exit after clean-env pytest for debugging.")
     return parser.parse_args(argv)
 
@@ -2068,6 +2114,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime_rows,
         summary_state,
         packet_root=packet_root,
+        roi_benchmark_dir=args.roi_benchmark_dir,
     )
     return 0 if consistency.get("passed") else 1
 

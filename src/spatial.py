@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.ndimage import distance_transform_edt, gaussian_filter
-from scipy.spatial import Voronoi, cKDTree
+from scipy.spatial import QhullError, Voronoi, cKDTree
 from shapely.geometry import MultiPolygon, Polygon, box
 
 from src.config import MICRONS_PER_PIXEL
@@ -77,7 +77,10 @@ def voronoi_regulariry_index(centroids: np.ndarray, shape: tuple[int, int]) -> d
         return {"cv": 0.0, "vdri": 0.0}
 
     points = centroids[:, ::-1]
-    v = Voronoi(points)
+    try:
+        v = Voronoi(points)
+    except QhullError:
+        return {"cv": 0.0, "vdri": 0.0}
     areas = []
     w, h = shape[1], shape[0]
 
@@ -183,6 +186,61 @@ def rigorous_points_from_object_table(
     return subset[["centroid_y_px", "centroid_x_px"]].to_numpy(dtype=float)
 
 
+def _boundary_distances(points_yx: np.ndarray, domain_mask: np.ndarray) -> np.ndarray:
+    if len(points_yx) == 0:
+        return np.empty(0, dtype=float)
+    distance_map = distance_transform_edt(domain_mask.astype(bool))
+    ys = np.clip(np.round(points_yx[:, 0]).astype(int), 0, domain_mask.shape[0] - 1)
+    xs = np.clip(np.round(points_yx[:, 1]).astype(int), 0, domain_mask.shape[1] - 1)
+    return distance_map[ys, xs].astype(float, copy=False)
+
+
+def choose_valid_radii_px(
+    points_yx: np.ndarray,
+    domain_mask: np.ndarray,
+    requested_radii_px: Sequence[float],
+    *,
+    min_points: int = MIN_RIGOROUS_POINTS,
+    min_eligible_points: int = 3,
+    min_finite_radii: int = 2,
+) -> dict[str, Any]:
+    requested = [float(radius) for radius in requested_radii_px]
+    if float(domain_mask.sum()) <= 0:
+        return {
+            "requested_radii_px": requested,
+            "used_radii_px": [],
+            "usable_max_radius_px": 0.0,
+            "n_points": int(len(points_yx)),
+            "n_radii_requested": int(len(requested)),
+            "n_radii_used": 0,
+            "status_reason": "empty_domain",
+        }
+    if len(points_yx) < min_points:
+        return {
+            "requested_radii_px": requested,
+            "used_radii_px": [],
+            "usable_max_radius_px": 0.0,
+            "n_points": int(len(points_yx)),
+            "n_radii_requested": int(len(requested)),
+            "n_radii_used": 0,
+            "status_reason": "insufficient_points",
+        }
+
+    boundary_distances = _boundary_distances(np.asarray(points_yx, dtype=float), domain_mask)
+    used = [float(radius) for radius in requested if int(np.sum(boundary_distances >= float(radius))) >= int(min_eligible_points)]
+    usable_max_radius = float(np.max(boundary_distances)) if boundary_distances.size else 0.0
+    status_reason = "ok" if len(used) >= int(min_finite_radii) else "no_valid_radii"
+    return {
+        "requested_radii_px": requested,
+        "used_radii_px": used,
+        "usable_max_radius_px": usable_max_radius,
+        "n_points": int(len(points_yx)),
+        "n_radii_requested": int(len(requested)),
+        "n_radii_used": int(len(used)),
+        "status_reason": status_reason,
+    }
+
+
 def _sample_points_from_mask(mask: np.ndarray, count: int, seed: int) -> np.ndarray:
     ys, xs = np.where(mask)
     if len(xs) < count or count <= 0:
@@ -258,7 +316,10 @@ def exact_voronoi_clipped_areas(
         return np.array([], dtype=float)
 
     points_xy = np.asarray(centroids[:, ::-1], dtype=float)
-    vor = Voronoi(points_xy)
+    try:
+        vor = Voronoi(points_xy)
+    except QhullError:
+        return np.array([], dtype=float)
     regions, vertices = _voronoi_finite_polygons_2d(vor)
 
     areas: list[float] = []
@@ -317,11 +378,8 @@ def _border_corrected_l_values(points_yx: np.ndarray, domain_mask: np.ndarray, r
     if area_px <= 0:
         return values
 
-    distance_map = distance_transform_edt(domain_mask.astype(bool))
     tree = cKDTree(points_yx)
-    ys = np.clip(np.round(points_yx[:, 0]).astype(int), 0, domain_mask.shape[0] - 1)
-    xs = np.clip(np.round(points_yx[:, 1]).astype(int), 0, domain_mask.shape[1] - 1)
-    boundary_distances = distance_map[ys, xs]
+    boundary_distances = _boundary_distances(points_yx, domain_mask)
 
     for index, radius in enumerate(radii):
         eligible = boundary_distances >= radius
@@ -348,11 +406,8 @@ def _pair_correlation_values(points_yx: np.ndarray, domain_mask: np.ndarray, rad
     if area_px <= 0:
         return values
 
-    distance_map = distance_transform_edt(domain_mask.astype(bool))
     tree = cKDTree(points_yx)
-    ys = np.clip(np.round(points_yx[:, 0]).astype(int), 0, domain_mask.shape[0] - 1)
-    xs = np.clip(np.round(points_yx[:, 1]).astype(int), 0, domain_mask.shape[1] - 1)
-    boundary_distances = distance_map[ys, xs]
+    boundary_distances = _boundary_distances(points_yx, domain_mask)
 
     prev_radius = 0.0
     for index, radius in enumerate(radii):
@@ -465,12 +520,44 @@ def _safe_percentile(stack: np.ndarray, percentile: float) -> np.ndarray:
     return out
 
 
-def _domain_status(domain_mask: np.ndarray, point_count: int) -> str:
+def _domain_status(
+    domain_mask: np.ndarray,
+    point_count: int,
+    *,
+    n_radii_used: int,
+    n_finite_l: int,
+    n_finite_g: int,
+) -> str:
     if float(domain_mask.sum()) <= 0:
         return "empty_domain"
     if point_count < MIN_RIGOROUS_POINTS:
         return "insufficient_points"
-    return "ok"
+    if n_radii_used <= 0:
+        return "no_valid_radii"
+    if n_finite_l >= 2 and n_finite_g >= 2:
+        return "ok"
+    if n_finite_l >= 2:
+        return "finite_l_only"
+    if n_finite_g >= 2:
+        return "finite_g_only"
+    return "no_valid_radii"
+
+
+def _spatial_curve_warning(status: str, *, requested_radii: Sequence[float], used_radii: Sequence[float]) -> str | None:
+    if status == "ok":
+        return None
+    if status == "empty_domain":
+        return "Spatial analysis domain was empty."
+    if status == "insufficient_points":
+        return "Too few points were available for rigorous spatial analysis."
+    if status == "finite_l_only":
+        return "Rigorous spatial analysis produced finite Ripley L values but non-finite pair-correlation values."
+    if status == "finite_g_only":
+        return "Rigorous spatial analysis produced finite pair-correlation values but non-finite Ripley L values."
+    return (
+        "Rigorous spatial analysis produced no finite values at the selected radii. "
+        f"Requested radii={list(requested_radii)}, used radii={list(used_radii)}."
+    )
 
 
 def _coerce_bool_mask(mask: np.ndarray | None, shape: tuple[int, int]) -> np.ndarray:
@@ -544,27 +631,60 @@ def analyze_rigorous_domain(
     simulation_count: int,
 ) -> RigorousSpatialResult:
     points = np.asarray(points_yx, dtype=float)
-    status = _domain_status(domain.mask, len(points))
+    radii_info = choose_valid_radii_px(points, domain.mask, radii_px)
+    requested_radii = np.asarray(radii_info["requested_radii_px"], dtype=float)
+    used_radii = np.asarray(radii_info["used_radii_px"], dtype=float)
     legacy_nn = nn_regularity_index(points)
     legacy_vd = voronoi_regulariry_index(points, image_shape)
     rigorous_voronoi = rigorous_voronoi_metrics(points, domain.polygon, image_shape=image_shape)
     envelopes = compute_csr_envelopes(
         points,
         domain.mask,
-        radii_px=radii_px,
+        radii_px=used_radii,
         simulation_count=simulation_count,
         seed=domain.random_seed,
+    )
+    aligned = {
+        "l_obs": np.full(len(requested_radii), np.nan, dtype=float),
+        "l_env_low": np.full(len(requested_radii), np.nan, dtype=float),
+        "l_env_high": np.full(len(requested_radii), np.nan, dtype=float),
+        "g_obs": np.full(len(requested_radii), np.nan, dtype=float),
+        "g_env_low": np.full(len(requested_radii), np.nan, dtype=float),
+        "g_env_high": np.full(len(requested_radii), np.nan, dtype=float),
+    }
+    if len(used_radii):
+        for used_index, radius in enumerate(used_radii):
+            target = np.where(np.isclose(requested_radii, float(radius)))[0]
+            if target.size == 0:
+                continue
+            target_index = int(target[0])
+            for key in aligned:
+                aligned[key][target_index] = envelopes[key][used_index]
+
+    n_finite_l = int(np.isfinite(aligned["l_obs"]).sum())
+    n_finite_g = int(np.isfinite(aligned["g_obs"]).sum())
+    status = _domain_status(
+        domain.mask,
+        len(points),
+        n_radii_used=int(radii_info["n_radii_used"]),
+        n_finite_l=n_finite_l,
+        n_finite_g=n_finite_g,
+    )
+    curve_warning = _spatial_curve_warning(
+        status,
+        requested_radii=requested_radii.tolist(),
+        used_radii=used_radii.tolist(),
     )
 
     curve_rows: list[dict[str, Any]] = []
     for radius, l_obs, l_low, l_high, g_obs, g_low, g_high in zip(
-        radii_px,
-        envelopes["l_obs"],
-        envelopes["l_env_low"],
-        envelopes["l_env_high"],
-        envelopes["g_obs"],
-        envelopes["g_env_low"],
-        envelopes["g_env_high"],
+        requested_radii,
+        aligned["l_obs"],
+        aligned["l_env_low"],
+        aligned["l_env_high"],
+        aligned["g_obs"],
+        aligned["g_env_low"],
+        aligned["g_env_high"],
     ):
         curve_rows.append(
             {
@@ -579,6 +699,7 @@ def analyze_rigorous_domain(
                 "g_obs": float(g_obs) if np.isfinite(g_obs) else float("nan"),
                 "g_env_low": float(g_low) if np.isfinite(g_low) else float("nan"),
                 "g_env_high": float(g_high) if np.isfinite(g_high) else float("nan"),
+                "radius_is_valid": bool(np.any(np.isclose(used_radii, float(radius)))),
                 "simulation_count": int(simulation_count),
                 "random_seed": int(domain.random_seed),
             }
@@ -595,6 +716,13 @@ def analyze_rigorous_domain(
         "domain_area_mm2": float(domain.area_mm2),
         "domain_source": domain.domain_source,
         "status": status,
+        "radii_requested_px": [float(radius) for radius in requested_radii.tolist()],
+        "radii_used_px": [float(radius) for radius in used_radii.tolist()],
+        "usable_max_radius_px": float(radii_info["usable_max_radius_px"]),
+        "n_finite_l": n_finite_l,
+        "n_finite_g": n_finite_g,
+        "spatial_curve_valid": bool(status == "ok"),
+        "spatial_curve_warning": curve_warning,
         "legacy_nnri": float(legacy_nn["nnri"]),
         "legacy_vdri": float(legacy_vd["vdri"]),
         "rigorous_voronoi_cv": float(rigorous_voronoi["cv"]) if np.isfinite(rigorous_voronoi["cv"]) else float("nan"),
@@ -659,11 +787,17 @@ def compute_rigorous_spatial_bundle(
         global_summary = {
             "spatial_mode": "rigorous",
             "rigorous_global_point_count": int(row["n_points"]),
+            "rigorous_global_status": row["status"],
             "rigorous_global_vdri": float(row["rigorous_vdri"]) if pd.notna(row["rigorous_vdri"]) else float("nan"),
             "rigorous_global_l_outside_envelope": bool(row["l_outside_envelope_any"]),
             "rigorous_global_l_global_p_value": float(row["l_global_p_value"]) if pd.notna(row["l_global_p_value"]) else float("nan"),
             "rigorous_global_l_max_abs_deviation": float(row["l_max_abs_deviation"]) if pd.notna(row["l_max_abs_deviation"]) else float("nan"),
             "rigorous_global_g_peak_value": float(row["g_peak_value"]) if pd.notna(row["g_peak_value"]) else float("nan"),
+            "rigorous_global_n_finite_l": int(row["n_finite_l"]),
+            "rigorous_global_n_finite_g": int(row["n_finite_g"]),
+            "rigorous_global_usable_max_radius_px": float(row["usable_max_radius_px"]),
+            "rigorous_global_curve_valid": bool(row["spatial_curve_valid"]),
+            "rigorous_global_curve_warning": row["spatial_curve_warning"],
         }
 
     return {
@@ -672,7 +806,8 @@ def compute_rigorous_spatial_bundle(
         "global_summary": global_summary,
         "spatial_analysis": {
             "mode": "rigorous",
-            "radii_px": [float(radius) for radius in radii_px],
+            "radii_requested_px": [float(radius) for radius in radii_px],
+            "adaptive_radii": True,
             "simulation_count": int(simulation_count),
             "random_seed": int(base_seed),
             "regionwise_analysis_run": bool((summary["analysis_level"] == "region").any()) if not summary.empty else False,
@@ -692,22 +827,42 @@ def _plot_curve_frame(
 ) -> Path:
     destination = Path(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    plt.figure(figsize=(6, 4))
+    fig, ax = plt.subplots(figsize=(6, 4))
+    wrote_any_curve = False
     if not curve_frame.empty:
         radii = curve_frame["radius_px"].to_numpy(dtype=float)
         observed = curve_frame[value_column].to_numpy(dtype=float)
         low = curve_frame[low_column].to_numpy(dtype=float)
         high = curve_frame[high_column].to_numpy(dtype=float)
-        plt.plot(radii, observed, label="Observed", color="#1f77b4")
-        plt.fill_between(radii, low, high, alpha=0.25, color="#ff7f0e", label="CSR envelope")
-    plt.axhline(0.0, color="#999999", linewidth=1.0, linestyle="--")
-    plt.xlabel("Radius (px)")
-    plt.ylabel(ylabel)
-    plt.title(title)
-    plt.legend(loc="best")
-    plt.tight_layout()
-    plt.savefig(destination, dpi=180)
-    plt.close()
+        finite_observed = np.isfinite(observed)
+        finite_envelope = np.isfinite(low) & np.isfinite(high)
+        if finite_observed.any():
+            ax.plot(radii, observed, label="Observed", color="#1f77b4")
+            wrote_any_curve = True
+        if finite_envelope.any():
+            ax.fill_between(radii, low, high, alpha=0.25, color="#ff7f0e", label="CSR envelope")
+            wrote_any_curve = True
+    if not wrote_any_curve:
+        ax.text(
+            0.5,
+            0.5,
+            "No finite values at selected radii",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            fontsize=11,
+            color="#555555",
+        )
+    ax.axhline(0.0, color="#999999", linewidth=1.0, linestyle="--")
+    ax.set_xlabel("Radius (px)")
+    ax.set_ylabel(ylabel)
+    ax.set_title(title)
+    handles, labels = ax.get_legend_handles_labels()
+    if handles:
+        ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(destination, dpi=180)
+    plt.close(fig)
     return destination
 
 

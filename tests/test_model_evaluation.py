@@ -186,6 +186,81 @@ def test_count_only_rows_do_not_override_overlap_ranking(tmp_path: Path):
     assert ranked_summary.iloc[0]["model_label"] == "builtin"
 
 
+def test_backend_comparison_prefers_lower_mae_when_only_counts_exist(tmp_path: Path):
+    image_path = tmp_path / "image.tif"
+    tifffile.imwrite(image_path, np.zeros((8, 8), dtype=np.uint8))
+
+    manifest = pd.DataFrame(
+        [
+            {
+                "run_id": "blob",
+                "image_path": str(image_path),
+                "label_path": None,
+                "manual_count": 2,
+                "backend": "blob_watershed",
+                "segmentation_preset": "flatmount_rgc_rbpms_demo",
+                "model_type": None,
+                "cellpose_model": None,
+                "stardist_weights": None,
+                "sam_checkpoint": None,
+                "model_alias": "blob",
+                "diameter": None,
+                "channel_index": 0,
+                "notes": "",
+            },
+            {
+                "run_id": "cellpose",
+                "image_path": str(image_path),
+                "label_path": None,
+                "manual_count": 2,
+                "backend": "cellpose",
+                "segmentation_preset": None,
+                "model_type": "cyto",
+                "cellpose_model": None,
+                "stardist_weights": None,
+                "sam_checkpoint": None,
+                "model_alias": "cellpose",
+                "diameter": None,
+                "channel_index": 0,
+                "notes": "",
+            },
+        ]
+    )
+
+    def fake_runtime_builder(options):
+        return FakeRuntime(
+            model_spec=ModelSpec(
+                backend=options.backend or "cellpose",
+                source="builtin",
+                model_label=str(options.model_alias or options.backend),
+                display_label=str(options.model_alias or options.backend),
+                builtin_name=options.model_type,
+                asset_path=None,
+                model_type=options.model_type,
+                alias=options.model_alias,
+                trust_mode="builtin",
+            )
+        )
+
+    def fake_runtime_runner(runtime, image, source_path, meta):
+        labels = np.zeros((8, 8), dtype=np.uint16)
+        if runtime.model_spec.model_label == "blob":
+            labels[1:3, 1:3] = 1
+            labels[5:7, 5:7] = 2
+        else:
+            labels[1:3, 1:3] = 1
+        return FakeContext(labels)
+
+    _, ranked_summary, metadata = evaluate_model_manifest(
+        manifest,
+        runtime_builder=fake_runtime_builder,
+        runtime_runner=fake_runtime_runner,
+    )
+
+    assert metadata["ranking_rule"] == "mae_only"
+    assert ranked_summary.iloc[0]["model_label"] == "blob"
+
+
 def test_write_evaluation_outputs(tmp_path: Path):
     per_run = pd.DataFrame([{"run_id": "r1", "dice_score": 1.0}])
     summary = pd.DataFrame([{"model_label": "builtin", "rank": 1}])

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -35,6 +35,7 @@ from src.models import build_segmenter
 from src.phenotype import load_rules
 from src.phenotype_engine import load_engine_config
 from src.pipeline import build_default_pipeline
+from src.presets import apply_segmentation_preset
 from src.provenance import build_run_provenance, write_provenance
 from src.regions import region_table_path_for, write_region_table
 from src.report import write_html_report
@@ -64,12 +65,15 @@ BBoxSelector = Callable[[np.ndarray], tuple[int, int, int, int]]
 
 @dataclass
 class RuntimeOptions:
-    backend: str = "cellpose"
+    backend: str | None = None
     diameter: float | None = None
     model_type: str | None = None
     cellpose_model: str | None = None
     stardist_weights: str | None = None
     model_alias: str | None = None
+    segmentation_preset: str | None = None
+    segmenter_config: dict[str, Any] | None = None
+    object_filters: dict[str, Any] | None = None
     min_size: int | None = None
     max_size: int | None = None
     use_gpu: bool | None = None
@@ -142,9 +146,12 @@ def _resolved_config(runtime: AppRuntime) -> dict[str, Any]:
         "backend": runtime.backend,
         "diameter": runtime.diameter,
         "model_type": runtime.model_type,
+        "segmentation_preset": options.segmentation_preset,
         "cellpose_model": options.cellpose_model,
         "stardist_weights": options.stardist_weights,
         "model_alias": options.model_alias,
+        "segmenter_config": copy.deepcopy(options.segmenter_config) if options.segmenter_config is not None else None,
+        "object_filters": copy.deepcopy(options.object_filters) if options.object_filters is not None else None,
         **model_summary_fields(runtime.model_spec),
         "model_spec": model_spec_to_dict(runtime.model_spec),
         "min_size": runtime.min_size,
@@ -195,12 +202,43 @@ def build_runtime(
     bbox_selector: BBoxSelector | None = None,
     segmenter_override: Any | None = None,
 ) -> AppRuntime:
+    resolved_options_dict = apply_segmentation_preset(
+        {
+            "backend": options.backend,
+            "diameter": options.diameter,
+            "model_type": options.model_type,
+            "cellpose_model": options.cellpose_model,
+            "stardist_weights": options.stardist_weights,
+            "model_alias": options.model_alias,
+            "segmentation_preset": options.segmentation_preset,
+            "segmenter_config": copy.deepcopy(options.segmenter_config) if options.segmenter_config is not None else None,
+            "object_filters": copy.deepcopy(options.object_filters) if options.object_filters is not None else None,
+            "min_size": options.min_size,
+            "max_size": options.max_size,
+            "apply_clahe": options.apply_clahe,
+            "marker_metrics": options.marker_metrics,
+        }
+    )
+    options = replace(
+        options,
+        backend=resolved_options_dict.get("backend"),
+        diameter=resolved_options_dict.get("diameter"),
+        model_type=resolved_options_dict.get("model_type"),
+        segmentation_preset=resolved_options_dict.get("segmentation_preset"),
+        segmenter_config=resolved_options_dict.get("segmenter_config"),
+        object_filters=resolved_options_dict.get("object_filters"),
+        min_size=resolved_options_dict.get("min_size"),
+        max_size=resolved_options_dict.get("max_size"),
+        apply_clahe=bool(resolved_options_dict.get("apply_clahe", options.apply_clahe)),
+        marker_metrics=bool(resolved_options_dict.get("marker_metrics", options.marker_metrics)),
+    )
+
     diameter = options.diameter if options.diameter is not None else CELL_DIAMETER
     model_type = options.model_type or MODEL_TYPE
     min_size = int(options.min_size if options.min_size is not None else MIN_CELL_SIZE)
     max_size = int(options.max_size if options.max_size is not None else MAX_CELL_SIZE)
     use_gpu = bool(options.use_gpu) if options.use_gpu is not None else bool(USE_GPU and torch.cuda.is_available())
-    if segmenter_override is not None and (options.backend or "cellpose").lower() not in {"cellpose", "stardist", "sam"}:
+    if segmenter_override is not None and (options.backend or "cellpose").lower() not in {"cellpose", "stardist", "sam", "blob_watershed"}:
         backend_name = (options.backend or "override").lower()
         model_spec = ModelSpec(
             backend=backend_name,
@@ -233,6 +271,7 @@ def build_runtime(
         model_spec=model_spec,
         diameter=diameter,
         use_gpu=use_gpu,
+        segmenter_config=copy.deepcopy(options.segmenter_config) if options.segmenter_config is not None else None,
     )
     pipeline_cfg = {
         "apply_clahe": options.apply_clahe,
@@ -251,6 +290,9 @@ def build_runtime(
         "spatial_random_seed": options.spatial_random_seed,
         "backend": backend,
         "use_gpu": use_gpu,
+        "segmentation_preset": options.segmentation_preset,
+        "segmenter_config": copy.deepcopy(options.segmenter_config) if options.segmenter_config is not None else None,
+        "object_filters": copy.deepcopy(options.object_filters) if options.object_filters is not None else None,
         "model_spec": model_summary_fields(model_spec),
         "phenotype_engine": options.phenotype_engine,
         "atlas_subtype_priors": options.atlas_subtype_priors,
@@ -578,6 +620,7 @@ def export_context(
                 "backend": runtime.backend,
                 "model_label": runtime.model_spec.model_label,
                 "model_source": runtime.model_spec.source,
+                "segmentation_preset": runtime.options.segmentation_preset,
                 "modality": runtime.options.modality,
                 "diameter": runtime.diameter,
                 "min_size": runtime.min_size,

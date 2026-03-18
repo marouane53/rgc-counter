@@ -134,7 +134,7 @@ def resolve_model_spec(
         else:
             inferred_backend = "cellpose"
 
-    if inferred_backend not in {"cellpose", "stardist", "sam"}:
+    if inferred_backend not in {"cellpose", "stardist", "sam", "blob_watershed"}:
         raise ValueError(f"Unsupported backend: {inferred_backend}")
 
     for flag_backend, value in custom_flags.items():
@@ -184,6 +184,15 @@ def resolve_model_spec(
             builtin_name=DEFAULT_STARDIST_MODEL,
             alias=alias,
             model_type=None,
+        )
+
+    if inferred_backend == "blob_watershed":
+        builtin_name = str(model_type).strip() if model_type is not None and str(model_type).strip() else "blob_watershed"
+        return _builtin_spec(
+            backend="blob_watershed",
+            builtin_name=builtin_name,
+            alias=alias,
+            model_type=builtin_name,
         )
 
     if not sam_checkpoint:

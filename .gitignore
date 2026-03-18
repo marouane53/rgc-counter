@@ -8,6 +8,9 @@ Outputs_example_maps_fix/
 Outputs_model_eval/
 Outputs_model_eval_final/
 Outputs_model_eval_fix/
+Outputs_roi_benchmark/
+Outputs_roi_benchmark_suite/
+Outputs_roi_benchmark*/
 Outputs_*_consistency*/
 paper_evidence/
 planning/

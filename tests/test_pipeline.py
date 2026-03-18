@@ -4,6 +4,7 @@ import numpy as np
 
 from src.context import RunContext
 from src.pipeline import build_default_pipeline
+from src.run_service import RuntimeOptions, build_runtime
 
 
 class FakeSegmenter:
@@ -219,6 +220,63 @@ def test_pipeline_warns_when_rigorous_spatial_has_too_few_points():
     out = pipeline.run(ctx, cfg)
 
     assert any("too few points" in warning for warning in out.warnings)
+
+
+def test_pipeline_warns_when_rigorous_curves_nonfinite():
+    image = np.zeros((64, 64), dtype=np.uint16)
+    image[28:34, 8:56] = 200
+    labels = np.zeros((64, 64), dtype=np.uint16)
+    labels[29:33, 10:14] = 1
+    labels[29:33, 18:22] = 2
+    labels[29:33, 26:30] = 3
+    labels[29:33, 34:38] = 4
+    labels[29:33, 42:46] = 5
+
+    ctx = RunContext(path=Path("sample.tif"), image=image, meta={"reader": "test"})
+    pipeline = build_default_pipeline(FakeSegmenter(labels))
+    cfg = {
+        "apply_clahe": False,
+        "focus_mode": "none",
+        "tta": False,
+        "tta_transforms": None,
+        "min_size": 1,
+        "max_size": 1000,
+        "spatial_stats": True,
+        "spatial_mode": "rigorous",
+        "spatial_envelope_sims": 8,
+        "spatial_random_seed": 19,
+        "spatial_radii_px": [25.0, 50.0, 75.0],
+        "backend": "fake",
+        "use_gpu": False,
+        "register_retina": False,
+    }
+
+    out = pipeline.run(ctx, cfg)
+
+    assert any("no finite global curves" in warning for warning in out.warnings)
+    assert out.summary_row["rigorous_global_curve_valid"] is False
+
+
+def test_segmentation_preset_applies_defaults_without_overriding_cli():
+    preset_runtime = build_runtime(RuntimeOptions(segmentation_preset="flatmount_rgc_rbpms_demo", use_gpu=False))
+    explicit_runtime = build_runtime(
+        RuntimeOptions(
+            segmentation_preset="flatmount_rgc_rbpms_demo",
+            backend="cellpose",
+            diameter=30.0,
+            min_size=99,
+            max_size=999,
+            use_gpu=False,
+        )
+    )
+
+    assert preset_runtime.backend == "blob_watershed"
+    assert preset_runtime.options.apply_clahe is True
+    assert preset_runtime.min_size == 20
+    assert explicit_runtime.backend == "cellpose"
+    assert explicit_runtime.diameter == 30.0
+    assert explicit_runtime.min_size == 99
+    assert explicit_runtime.max_size == 999
 
 
 def test_pipeline_runs_atlas_subtype_priors_with_registration():

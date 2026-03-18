@@ -15,7 +15,12 @@ from src.marker_metrics import add_marker_metrics
 from src.config import data as CONFIG_DATA
 from src.context import RunContext
 from src.focus_detection import compute_in_focus_mask_auto
-from src.measurements import add_uncertainty_summary_columns, build_object_table
+from src.measurements import (
+    add_uncertainty_summary_columns,
+    apply_object_filters,
+    build_object_table,
+    relabel_kept_objects,
+)
 from src.phenotype import apply_marker_rules
 from src.phenotype_engine import assign_phenotypes
 from src.postprocessing import apply_clahe, postprocess_masks
@@ -357,6 +362,55 @@ class MarkerMetricsStage:
 
 
 @dataclass
+class ObjectFilterStage:
+    phenotype_engine_config: dict[str, Any] | None = None
+    name: str = "object_filters"
+
+    def run(self, ctx: RunContext, cfg: dict[str, Any]) -> RunContext:
+        filters = cfg.get("object_filters") or {}
+        if not filters:
+            return ctx
+        if ctx.object_table is None or ctx.labels is None or ctx.qc_mask is None:
+            raise ValueError("ObjectFilterStage requires object_table, labels, and qc_mask.")
+
+        filtered = apply_object_filters(ctx.object_table, filters)
+        kept_before = len(filtered)
+        kept_after = int(filtered["kept"].fillna(True).astype(bool).sum()) if "kept" in filtered.columns else kept_before
+        dropped = int(kept_before - kept_after)
+        ctx.metrics["object_filtering"] = {
+            "filters": dict(filters),
+            "n_objects_before": int(kept_before),
+            "n_objects_after": int(kept_after),
+            "n_objects_dropped": dropped,
+        }
+        ctx.summary_row["object_filters_applied"] = bool(filters)
+        ctx.summary_row["object_filters_kept"] = int(kept_after)
+        ctx.summary_row["object_filters_dropped"] = dropped
+        if dropped <= 0:
+            ctx.object_table = filtered
+            _set_object_flow_metrics(ctx, n_objects_kept=kept_after)
+            return ctx
+
+        ctx.labels = relabel_kept_objects(ctx.labels, filtered)
+        _update_measurements_and_summary(ctx, cfg)
+
+        if cfg.get("marker_metrics") or cfg.get("phenotype_engine", "legacy") == "v2" or cfg.get("atlas_subtype_priors_config") is not None:
+            engine_config = None
+            if cfg.get("phenotype_engine", "legacy") == "v2":
+                engine_config = cfg.get("phenotype_engine_config", self.phenotype_engine_config)
+            elif cfg.get("atlas_subtype_priors_config") is not None:
+                engine_config = cfg.get("atlas_subtype_priors_config")
+            ctx.object_table = add_marker_metrics(ctx.object_table, ctx.image, ctx.labels, config=engine_config)
+
+        if cfg.get("phenotype_engine", "legacy") == "v2":
+            engine_config = cfg.get("phenotype_engine_config", self.phenotype_engine_config)
+            if engine_config is not None and ctx.object_table is not None:
+                ctx.object_table = assign_phenotypes(ctx.object_table, engine_config)
+                ctx.metrics["phenotype_counts"] = ctx.object_table["phenotype"].value_counts().to_dict()
+        return ctx
+
+
+@dataclass
 class PhenotypeEngineStage:
     phenotype_engine_config: dict[str, Any] | None = None
     name: str = "phenotype_engine"
@@ -619,6 +673,11 @@ class SpatialStatsStage:
                 message = "Counting/spatial mismatch detected: nonzero cell_count but zero rigorous global points."
                 _append_warning(ctx, message)
                 raise RuntimeError(message)
+            if global_point_count > 0 and not bool(rigorous["global_summary"].get("rigorous_global_curve_valid", False)):
+                _append_warning(
+                    ctx,
+                    "Rigorous spatial analysis produced no finite global curves; radii are incompatible with the domain geometry or point set.",
+                )
         return ctx
 
 
@@ -637,8 +696,9 @@ def build_default_pipeline(
         PhenotypeStage(phenotype_rules=phenotype_rules),
         MeasurementStage(),
         MarkerMetricsStage(phenotype_engine_config=phenotype_engine_config),
-        PhenotypeEngineStage(phenotype_engine_config=phenotype_engine_config),
         ReviewStage(phenotype_engine_config=phenotype_engine_config),
+        ObjectFilterStage(phenotype_engine_config=phenotype_engine_config),
+        PhenotypeEngineStage(phenotype_engine_config=phenotype_engine_config),
         RetinaRegistrationStage(),
         AtlasSubtypeStage(),
         InteractionMetricsStage(),

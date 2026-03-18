@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import tifffile
+from scipy.optimize import linear_sum_assignment
+from scipy.spatial.distance import cdist
 
 
 def count_labels(path: str | Path) -> int:
@@ -13,6 +16,223 @@ def count_labels(path: str | Path) -> int:
     object_ids = np.unique(labels)
     object_ids = object_ids[object_ids != 0]
     return int(len(object_ids))
+
+
+def load_manual_points(path: str | Path) -> np.ndarray:
+    frame = pd.read_csv(path)
+    required = {"x_px", "y_px"}
+    missing = sorted(required - set(frame.columns))
+    if missing:
+        raise ValueError(f"Manual points file is missing required columns: {missing}")
+    if frame.empty:
+        return np.empty((0, 2), dtype=float)
+    return frame[["y_px", "x_px"]].to_numpy(dtype=float)
+
+
+@dataclass(frozen=True)
+class PointMatchResult:
+    matched_pred_indices: np.ndarray
+    matched_manual_indices: np.ndarray
+    matched_distances_px: np.ndarray
+    unmatched_pred_indices: np.ndarray
+    unmatched_manual_indices: np.ndarray
+
+
+def match_points(
+    manual_points_yx: np.ndarray,
+    predicted_points_yx: np.ndarray,
+    *,
+    tolerance_px: float = 8.0,
+) -> PointMatchResult:
+    manual = np.asarray(manual_points_yx, dtype=float).reshape(-1, 2)
+    predicted = np.asarray(predicted_points_yx, dtype=float).reshape(-1, 2)
+    tolerance = float(tolerance_px)
+
+    if len(manual) == 0 or len(predicted) == 0:
+        return PointMatchResult(
+            matched_pred_indices=np.empty(0, dtype=int),
+            matched_manual_indices=np.empty(0, dtype=int),
+            matched_distances_px=np.empty(0, dtype=float),
+            unmatched_pred_indices=np.arange(len(predicted), dtype=int),
+            unmatched_manual_indices=np.arange(len(manual), dtype=int),
+        )
+
+    distances = cdist(predicted, manual, metric="euclidean")
+    row_ind, col_ind = linear_sum_assignment(distances)
+
+    matched_pred: list[int] = []
+    matched_manual: list[int] = []
+    matched_distances: list[float] = []
+    for pred_idx, manual_idx in zip(row_ind, col_ind):
+        distance = float(distances[pred_idx, manual_idx])
+        if distance <= tolerance:
+            matched_pred.append(int(pred_idx))
+            matched_manual.append(int(manual_idx))
+            matched_distances.append(distance)
+
+    matched_pred_arr = np.asarray(matched_pred, dtype=int)
+    matched_manual_arr = np.asarray(matched_manual, dtype=int)
+    matched_distances_arr = np.asarray(matched_distances, dtype=float)
+    unmatched_pred = np.setdiff1d(np.arange(len(predicted), dtype=int), matched_pred_arr, assume_unique=False)
+    unmatched_manual = np.setdiff1d(np.arange(len(manual), dtype=int), matched_manual_arr, assume_unique=False)
+
+    return PointMatchResult(
+        matched_pred_indices=matched_pred_arr,
+        matched_manual_indices=matched_manual_arr,
+        matched_distances_px=matched_distances_arr,
+        unmatched_pred_indices=unmatched_pred,
+        unmatched_manual_indices=unmatched_manual,
+    )
+
+
+def point_matching_metrics(
+    manual_points_yx: np.ndarray,
+    predicted_points_yx: np.ndarray,
+    *,
+    tolerance_px: float = 8.0,
+) -> dict[str, float]:
+    manual = np.asarray(manual_points_yx, dtype=float).reshape(-1, 2)
+    predicted = np.asarray(predicted_points_yx, dtype=float).reshape(-1, 2)
+    tolerance = float(tolerance_px)
+
+    if len(manual) == 0 and len(predicted) == 0:
+        return {
+            "manual_count": 0.0,
+            "predicted_count": 0.0,
+            "true_positive": 0.0,
+            "false_positive": 0.0,
+            "false_negative": 0.0,
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "count_bias": 0.0,
+            "count_mae": 0.0,
+            "match_tolerance_px": tolerance,
+            "mean_match_distance_px": float("nan"),
+        }
+
+    matches = match_points(manual, predicted, tolerance_px=tolerance)
+    true_positive = int(len(matches.matched_distances_px))
+    false_positive = int(max(len(predicted) - true_positive, 0))
+    false_negative = int(max(len(manual) - true_positive, 0))
+    precision = float(true_positive / (true_positive + false_positive)) if (true_positive + false_positive) > 0 else 0.0
+    recall = float(true_positive / (true_positive + false_negative)) if (true_positive + false_negative) > 0 else 0.0
+    f1 = float((2.0 * precision * recall) / (precision + recall)) if (precision + recall) > 0 else 0.0
+    count_bias = float(len(predicted) - len(manual))
+
+    return {
+        "manual_count": float(len(manual)),
+        "predicted_count": float(len(predicted)),
+        "true_positive": float(true_positive),
+        "false_positive": float(false_positive),
+        "false_negative": float(false_negative),
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "count_bias": count_bias,
+        "count_mae": float(abs(count_bias)),
+        "match_tolerance_px": tolerance,
+        "mean_match_distance_px": float(np.mean(matches.matched_distances_px)) if len(matches.matched_distances_px) else float("nan"),
+    }
+
+
+def validate_roi_benchmark_manifest(manifest_df: pd.DataFrame) -> pd.DataFrame:
+    required = [
+        "roi_id",
+        "image_path",
+        "marker",
+        "modality",
+        "x0",
+        "y0",
+        "width",
+        "height",
+        "annotator",
+        "manual_points_path",
+        "split",
+        "notes",
+    ]
+    frame = manifest_df.copy()
+    for column in required:
+        if column not in frame.columns:
+            frame[column] = pd.NA
+    missing = sorted(set(required[:10]) - set(manifest_df.columns))
+    if missing:
+        raise ValueError(f"ROI benchmark manifest is missing required columns: {missing}")
+    frame = frame[required].copy()
+    markers = [str(value).strip() for value in frame["marker"].dropna().tolist() if str(value).strip()]
+    if len(set(markers)) > 1:
+        raise ValueError("ROI benchmark manifest mixes markers. Use one matched marker family per run.")
+    modalities = [str(value).strip() for value in frame["modality"].dropna().tolist() if str(value).strip()]
+    if len(set(modalities)) > 1:
+        raise ValueError("ROI benchmark manifest mixes modalities. Use one matched modality per run.")
+    roi_ids = [str(value).strip() for value in frame["roi_id"].fillna("").tolist()]
+    if len(roi_ids) != len(set(roi_id for roi_id in roi_ids if roi_id)):
+        raise ValueError("ROI benchmark manifest contains duplicate roi_id values.")
+    frame["split"] = frame["split"].fillna("benchmark")
+    frame["notes"] = frame["notes"].fillna("")
+    return frame
+
+
+def summarize_roi_benchmark(results_frame: pd.DataFrame) -> pd.DataFrame:
+    if results_frame.empty:
+        return pd.DataFrame()
+    median_manual = float(results_frame["manual_count"].median()) if "manual_count" in results_frame.columns else float("nan")
+    mae = float(results_frame["count_mae"].mean()) if "count_mae" in results_frame.columns else float("nan")
+    precision = float(results_frame["precision"].mean()) if "precision" in results_frame.columns else float("nan")
+    recall = float(results_frame["recall"].mean()) if "recall" in results_frame.columns else float("nan")
+    f1 = float(results_frame["f1"].mean()) if "f1" in results_frame.columns else float("nan")
+    pass_threshold = bool(
+        np.isfinite(f1)
+        and np.isfinite(recall)
+        and np.isfinite(mae)
+        and np.isfinite(median_manual)
+        and f1 >= 0.75
+        and recall >= 0.75
+        and (median_manual <= 0 or mae <= 0.10 * median_manual)
+    )
+    return pd.DataFrame(
+        [
+            {
+                "benchmark_kind": "roi_point_matching",
+                "matched_modality": True,
+                "n_rois": int(len(results_frame)),
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "mae": mae,
+                "pass_threshold": pass_threshold,
+                "median_manual_count": median_manual,
+                "runtime_seconds_mean": float(results_frame["runtime_seconds"].mean()) if "runtime_seconds" in results_frame.columns else float("nan"),
+            }
+        ]
+    )
+
+
+def build_benchmark_quality_table(
+    *,
+    benchmark_kind: str,
+    matched_modality: bool,
+    n_rois: int,
+    precision: float | None = None,
+    recall: float | None = None,
+    f1: float | None = None,
+    mae: float | None = None,
+    pass_threshold: bool | None = None,
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "benchmark_kind": benchmark_kind,
+                "matched_modality": bool(matched_modality),
+                "n_rois": int(n_rois),
+                "precision": precision,
+                "recall": recall,
+                "f1": f1,
+                "mae": mae,
+                "pass_threshold": pass_threshold,
+            }
+        ]
+    )
 
 
 def build_validation_table(sample_table: pd.DataFrame) -> pd.DataFrame:

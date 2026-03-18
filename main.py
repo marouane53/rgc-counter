@@ -59,6 +59,7 @@ from src.phenotype import load_rules
 from src.provenance import build_run_provenance, write_provenance
 from src.regions import region_table_path_for, write_region_table
 from src.report import write_html_report
+from src.presets import segmentation_preset_names
 from src.retina_coords import (
     registered_density_plot_path,
     retina_frame_output_path,
@@ -89,6 +90,7 @@ from src.track import (
 from src.uncertainty_io import save_float_map
 from src.run_service import RuntimeOptions, build_runtime, run_one_image
 from src.validation import (
+    build_benchmark_quality_table,
     build_validation_table,
     save_agreement_scatter_plot,
     save_bland_altman_plot,
@@ -261,6 +263,12 @@ def _collect_run_warnings(
         )
         if bool(mismatch.any()):
             warnings.append("At least one sample has nonzero count but zero rigorous spatial points. Counting/spatial mismatch detected.")
+    if {"rigorous_global_point_count", "rigorous_global_curve_valid"}.issubset(sample_table.columns):
+        invalid_curves = (sample_table["rigorous_global_point_count"].fillna(0).astype(float) > 0.0) & (
+            ~sample_table["rigorous_global_curve_valid"].fillna(False).astype(bool)
+        )
+        if bool(invalid_curves.any()):
+            warnings.append("At least one sample has rigorous spatial points but no finite global rigorous curves. Treat spatial inference as invalid for those samples.")
     if validation_summary is not None and not validation_summary.empty and "mae" in validation_summary.columns:
         mae = float(validation_summary.iloc[0]["mae"])
         if np.isfinite(mae) and mae > mae_threshold:
@@ -284,7 +292,8 @@ def _spatial_analysis_payload(args: argparse.Namespace, contexts: list[RunContex
             return rigorous["spatial_analysis"]
     return {
         "mode": args.spatial_mode,
-        "radii_px": [25.0, 50.0, 75.0, 100.0, 150.0, 200.0],
+        "radii_requested_px": [25.0, 50.0, 75.0, 100.0, 150.0, 200.0],
+        "adaptive_radii": bool(args.spatial_mode == "rigorous"),
         "simulation_count": int(args.spatial_envelope_sims),
         "random_seed": int(args.spatial_random_seed),
         "regionwise_analysis_run": False,
@@ -298,12 +307,13 @@ def _runtime_options_from_args(
     use_gpu: bool,
 ) -> RuntimeOptions:
     return RuntimeOptions(
-        backend=args.backend or "cellpose",
+        backend=args.backend,
         diameter=args.diameter,
         model_type=args.model_type,
         cellpose_model=args.cellpose_model,
         stardist_weights=args.stardist_weights,
         model_alias=args.model_alias,
+        segmentation_preset=args.segmentation_preset,
         min_size=args.min_size,
         max_size=args.max_size,
         use_gpu=use_gpu,
@@ -1059,6 +1069,17 @@ def _run_study_mode(
     validation_dir = study_output_dir / "validation"
     validation_table = build_validation_table(sample_table)
     validation_summary = summarize_validation(validation_table) if not validation_table.empty else pd.DataFrame()
+    smoke_note = _tracked_smoke_note(sample_table["path"].tolist() if "path" in sample_table.columns else [])
+    benchmark_quality = pd.DataFrame()
+    if not validation_summary.empty:
+        validation_row = validation_summary.iloc[0]
+        benchmark_quality = build_benchmark_quality_table(
+            benchmark_kind="smoke_demo_regression" if smoke_note else "manual_count_validation",
+            matched_modality=bool(smoke_note is None),
+            n_rois=int(validation_row["n_samples"]),
+            mae=float(validation_row["mae"]) if pd.notna(validation_row["mae"]) else None,
+            pass_threshold=bool(pd.notna(validation_row["mae"]) and float(validation_row["mae"]) <= 1.0),
+        )
     if not validation_table.empty:
         validation_dir.mkdir(parents=True, exist_ok=True)
         validation_table.to_csv(validation_dir / "validation_details.csv", index=False)
@@ -1101,6 +1122,7 @@ def _run_study_mode(
             "backend": runtime.backend,
             "model_label": runtime.model_spec.model_label,
             "model_source": runtime.model_spec.source,
+            "segmentation_preset": runtime.options.segmentation_preset,
             "modality": args.modality,
             "diameter": runtime.diameter,
             "min_size": runtime.min_size,
@@ -1122,7 +1144,6 @@ def _run_study_mode(
         if not warning_table.empty:
             notes_parts.append("Sample-level warnings were recorded; inspect the warning summary and provenance.")
         run_warnings = _collect_run_warnings(sample_table, validation_summary=validation_summary)
-        smoke_note = _tracked_smoke_note(sample_table["path"].tolist() if "path" in sample_table.columns else [])
         if smoke_note:
             notes_parts.append(smoke_note)
         if run_warnings:
@@ -1149,6 +1170,8 @@ def _run_study_mode(
             extra_tables.append({"title": "Region Mixed Effects", "html": stats_result.region_mixed.head(40).to_html(index=False)})
         if not validation_summary.empty:
             extra_tables.append({"title": "Validation Summary", "html": validation_summary.to_html(index=False)})
+        if not benchmark_quality.empty:
+            extra_tables.append({"title": "Benchmark Quality", "html": benchmark_quality.to_html(index=False)})
         if not atlas_summary.empty:
             extra_tables.append({"title": "Atlas Summary", "html": atlas_summary.to_html(index=False)})
         if not atlas_subtype_summary.empty:
@@ -1223,6 +1246,7 @@ def main():
     parser.add_argument("--cellpose_model", type=str, default=None, help="Path to a trusted local custom Cellpose model")
     parser.add_argument("--stardist_weights", type=str, default=None, help="Path to trusted local custom StarDist weights or model directory")
     parser.add_argument("--model_alias", type=str, default=None, help="Optional human-readable model label stored in provenance and reports")
+    parser.add_argument("--segmentation_preset", type=str, choices=segmentation_preset_names(), default=None, help="Preset tuned for a narrow imaging use-case")
     parser.add_argument("--min_size", type=int, default=None, help="Override minimum mask area in pixels")
     parser.add_argument("--max_size", type=int, default=None, help="Override maximum mask area in pixels")
 
@@ -1245,7 +1269,7 @@ def main():
     focus_group.add_argument("--focus_qc", action="store_true", help="Multi-metric focus QC (recommended)")
 
     # Backend models
-    parser.add_argument("--backend", type=str, default=None, help="Segmentation backend: cellpose | stardist | sam")
+    parser.add_argument("--backend", type=str, default=None, help="Segmentation backend: cellpose | stardist | sam | blob_watershed")
     parser.add_argument("--sam_checkpoint", type=str, default=None, help="Path to SAM model checkpoint if backend=sam")
 
     # Phenotype logic
@@ -1436,6 +1460,7 @@ def main():
             "backend": runtime.backend,
             "model_label": runtime.model_spec.model_label,
             "model_source": runtime.model_spec.source,
+            "segmentation_preset": runtime.options.segmentation_preset,
             "modality": args.modality,
             "diameter": runtime.diameter,
             "min_size": runtime.min_size,
