@@ -13,6 +13,19 @@ if str(ROOT) not in sys.path:
 from src.roi_data import load_roi_manifest, qc_roi_manifest
 
 
+def _markdown_table(frame: pd.DataFrame) -> str:
+    if frame.empty:
+        return "_No rows._"
+    columns = list(frame.columns)
+    lines = [
+        "| " + " | ".join(columns) + " |",
+        "| " + " | ".join(["---"] * len(columns)) + " |",
+    ]
+    for row in frame.to_dict("records"):
+        lines.append("| " + " | ".join(str(row.get(column, "")) for column in columns) + " |")
+    return "\n".join(lines)
+
+
 def build_qc_markdown(qc: pd.DataFrame) -> str:
     lines = [
         "# ROI Source QC",
@@ -20,16 +33,17 @@ def build_qc_markdown(qc: pd.DataFrame) -> str:
         f"- Rows: `{len(qc)}`",
         f"- Missing images: `{int((~qc['image_exists']).sum()) if 'image_exists' in qc.columns else 0}`",
         f"- Out-of-bounds ROIs: `{int((~qc['bounds_ok']).sum()) if 'bounds_ok' in qc.columns else 0}`",
-        f"- Duplicate source files: `{int(qc['duplicate_image'].sum()) if 'duplicate_image' in qc.columns else 0}`",
+        f"- Reused source files: `{int(qc['reused_source_image'].sum()) if 'reused_source_image' in qc.columns else 0}`",
         f"- Duplicate crops: `{int(qc['duplicate_crop'].sum()) if 'duplicate_crop' in qc.columns else 0}`",
+        f"- Overlapping ROIs: `{int(qc['overlaps_with_other_roi'].sum()) if 'overlaps_with_other_roi' in qc.columns else 0}`",
         "",
     ]
     bad = qc[
         (~qc["image_exists"])
         | (~qc["bounds_ok"])
         | (~qc["crop_nonempty"])
-        | (qc["duplicate_image"])
         | (qc["duplicate_crop"])
+        | (qc["overlaps_with_other_roi"])
         | (~qc["marker_consistent"])
         | (~qc["modality_consistent"])
         | (qc["error"].fillna("").astype(str) != "")
@@ -37,7 +51,7 @@ def build_qc_markdown(qc: pd.DataFrame) -> str:
     if bad.empty:
         lines.extend(["## Result", "", "QC passed with no blocking issues.", ""])
     else:
-        lines.extend(["## Blocking issues", "", bad.to_markdown(index=False), ""])
+        lines.extend(["## Blocking issues", "", _markdown_table(bad), ""])
     return "\n".join(lines)
 
 
@@ -48,8 +62,8 @@ def qc_has_blockers(qc: pd.DataFrame) -> bool:
         (~qc["image_exists"]).any()
         or (~qc["bounds_ok"]).any()
         or (~qc["crop_nonempty"]).any()
-        or qc["duplicate_image"].any()
         or qc["duplicate_crop"].any()
+        or qc["overlaps_with_other_roi"].any()
         or (~qc["marker_consistent"]).any()
         or (~qc["modality_consistent"]).any()
         or (qc["error"].fillna("").astype(str) != "").any()
@@ -58,11 +72,12 @@ def qc_has_blockers(qc: pd.DataFrame) -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="QC a real ROI benchmark manifest.")
-    parser.add_argument("--roi_manifest", required=True, type=Path)
-    parser.add_argument("--output_dir", required=True, type=Path)
+    parser.add_argument("--roi_manifest", "--manifest", dest="roi_manifest", required=True, type=Path)
+    parser.add_argument("--output_dir", default=None, type=Path)
     args = parser.parse_args(argv)
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = (args.output_dir or (args.roi_manifest.resolve().parent / "qc")).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
     try:
         manifest = load_roi_manifest(args.roi_manifest)
         qc = qc_roi_manifest(manifest, manifest_path=args.roi_manifest)
@@ -82,8 +97,11 @@ def main(argv: list[str] | None = None) -> int:
                     "image_shape": None,
                     "bounds_ok": False,
                     "crop_nonempty": False,
+                    "reused_source_image": False,
                     "duplicate_image": False,
                     "duplicate_crop": False,
+                    "overlaps_with_other_roi": False,
+                    "overlap_details": "",
                     "marker_consistent": False,
                     "modality_consistent": False,
                     "error": str(exc),
@@ -91,8 +109,8 @@ def main(argv: list[str] | None = None) -> int:
             ]
         )
 
-    csv_path = args.output_dir / "source_qc.csv"
-    md_path = args.output_dir / "source_qc.md"
+    csv_path = output_dir / "source_qc.csv"
+    md_path = output_dir / "source_qc.md"
     qc.to_csv(csv_path, index=False)
     md_path.write_text(build_qc_markdown(qc) + "\n", encoding="utf-8")
 

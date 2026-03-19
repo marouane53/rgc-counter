@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -37,12 +38,35 @@ def audit_roi_benchmark_dir(benchmark_dir: str | Path) -> dict[str, object]:
     return {"passed": True, "reason": "benchmark_passed", "n_rois": n_rois}
 
 
+def write_audit_artifacts(benchmark_dir: str | Path, audit: dict[str, object]) -> dict[str, Path]:
+    benchmark_dir = Path(benchmark_dir)
+    report_dir = benchmark_dir / "report"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    json_path = report_dir / "benchmark_audit.json"
+    markdown_path = report_dir / "benchmark_audit.md"
+    json_path.write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
+    markdown_path.write_text(
+        "# ROI Benchmark Audit\n\n"
+        f"- Passed: `{bool(audit.get('passed'))}`\n"
+        f"- Reason: `{audit.get('reason')}`\n"
+        f"- ROIs: `{audit.get('n_rois', 'n/a')}`\n",
+        encoding="utf-8",
+    )
+    return {"json_path": json_path, "markdown_path": markdown_path}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Audit real ROI benchmark outputs.")
-    parser.add_argument("benchmark_dir", type=Path)
+    parser.add_argument("benchmark_dir_positional", nargs="?", type=Path)
+    parser.add_argument("--benchmark-dir", dest="benchmark_dir_option", type=Path, default=None)
     args = parser.parse_args(argv)
 
-    audit = audit_roi_benchmark_dir(args.benchmark_dir)
+    benchmark_dir = args.benchmark_dir_option or args.benchmark_dir_positional
+    if benchmark_dir is None:
+        parser.error("benchmark_dir is required.")
+    audit = audit_roi_benchmark_dir(benchmark_dir)
+    if Path(benchmark_dir).exists():
+        write_audit_artifacts(benchmark_dir, audit)
     print(audit["reason"])
     return 0 if bool(audit["passed"]) else 1
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
@@ -87,11 +87,50 @@ def load_roi_manifest(path: str | Path) -> pd.DataFrame:
     return validate_roi_benchmark_manifest(frame)
 
 
-def iter_roi_records(frame: pd.DataFrame, *, manifest_path: str | Path | None = None) -> list[RoiRecord]:
+def normalize_split_filters(values: Iterable[str] | str | None) -> set[str] | None:
+    if values is None:
+        return None
+    raw_values = [values] if isinstance(values, str) else list(values)
+    normalized: set[str] = set()
+    for raw in raw_values:
+        for token in str(raw).split(","):
+            candidate = token.strip()
+            if candidate:
+                normalized.add(candidate)
+    return normalized or None
+
+
+def filter_roi_manifest_by_split(
+    frame: pd.DataFrame,
+    *,
+    include_splits: Iterable[str] | str | None = None,
+    exclude_splits: Iterable[str] | str | None = None,
+) -> pd.DataFrame:
+    filtered = validate_roi_benchmark_manifest(frame).copy()
+    include = normalize_split_filters(include_splits)
+    exclude = normalize_split_filters(exclude_splits)
+    filtered["split"] = filtered["split"].fillna("benchmark").astype(str).str.strip().replace("", "benchmark")
+    if include is not None:
+        filtered = filtered.loc[filtered["split"].isin(include)].copy()
+    if exclude is not None:
+        filtered = filtered.loc[~filtered["split"].isin(exclude)].copy()
+    if filtered.empty:
+        raise ValueError("ROI benchmark manifest has no rows after split filtering.")
+    return filtered.reset_index(drop=True)
+
+
+def iter_roi_records(
+    frame: pd.DataFrame,
+    *,
+    manifest_path: str | Path | None = None,
+    include_splits: Iterable[str] | str | None = None,
+    exclude_splits: Iterable[str] | str | None = None,
+) -> list[RoiRecord]:
     base = Path(manifest_path).resolve().parent if manifest_path is not None else Path.cwd()
     rows: list[RoiRecord] = []
     seen_ids: set[str] = set()
-    for row in validate_roi_benchmark_manifest(frame).to_dict("records"):
+    filtered = filter_roi_manifest_by_split(frame, include_splits=include_splits, exclude_splits=exclude_splits)
+    for row in filtered.to_dict("records"):
         roi_id = str(row["roi_id"]).strip()
         if not roi_id:
             raise ValueError("ROI benchmark manifest contains blank roi_id.")
@@ -192,8 +231,31 @@ def qc_roi_manifest(frame: pd.DataFrame, *, manifest_path: str | Path | None = N
     if out.empty:
         return out
 
+    out["reused_source_image"] = out["image_path"].duplicated(keep=False)
     out["duplicate_image"] = out["image_sha256"].duplicated(keep=False) & out["image_sha256"].notna()
     out["duplicate_crop"] = out["crop_sha256"].duplicated(keep=False) & out["crop_sha256"].notna()
     out["marker_consistent"] = len({record.marker for record in records if record.marker}) <= 1
     out["modality_consistent"] = len({record.modality for record in records if record.modality}) <= 1
+    overlap_flags = [False] * len(records)
+    overlap_details = [""] * len(records)
+    for left_index, left in enumerate(records):
+        left_x1 = left.x0 + left.width
+        left_y1 = left.y0 + left.height
+        for right_index in range(left_index + 1, len(records)):
+            right = records[right_index]
+            if left.image_path != right.image_path:
+                continue
+            right_x1 = right.x0 + right.width
+            right_y1 = right.y0 + right.height
+            overlap_width = min(left_x1, right_x1) - max(left.x0, right.x0)
+            overlap_height = min(left_y1, right_y1) - max(left.y0, right.y0)
+            if overlap_width <= 0 or overlap_height <= 0:
+                continue
+            overlap_area = int(overlap_width * overlap_height)
+            overlap_flags[left_index] = True
+            overlap_flags[right_index] = True
+            overlap_details[left_index] = ", ".join(filter(None, [overlap_details[left_index], f"{right.roi_id}:{overlap_area}px"]))
+            overlap_details[right_index] = ", ".join(filter(None, [overlap_details[right_index], f"{left.roi_id}:{overlap_area}px"]))
+    out["overlaps_with_other_roi"] = overlap_flags
+    out["overlap_details"] = overlap_details
     return out

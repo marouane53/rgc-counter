@@ -29,6 +29,7 @@ from src.landmarks import build_tissue_mask, detect_onh_hole
 from src.report import copy_report_bundle
 from src.advisor_packet import (
     TRACKED_FIGURE_MAPPINGS,
+    assert_public_roi_benchmark_export_allowed,
     audit_advisor_packet,
     build_tracked_lane_comparison_md,
     export_hash_rows,
@@ -2070,6 +2071,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--evidence-root", type=Path, default=ROOT / "paper_evidence")
     parser.add_argument("--advisor-packet-dir", type=Path, default=None)
     parser.add_argument("--roi-benchmark-dir", type=Path, default=None, help="Optional Outputs_roi_benchmark_suite directory")
+    parser.add_argument("--allow-private-roi-benchmark-export", action="store_true")
     parser.add_argument("--stop-after-phase-a", action="store_true", help="Exit after clean-env pytest for debugging.")
     return parser.parse_args(argv)
 
@@ -2083,6 +2085,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     evidence_root = args.evidence_root.resolve()
     packet_root = (args.advisor_packet_dir or (evidence_root / "10_ai_advisor_packet")).resolve()
+    try:
+        assert_public_roi_benchmark_export_allowed(
+            args.roi_benchmark_dir,
+            allow_private_roi_benchmark_export=bool(args.allow_private_roi_benchmark_export),
+        )
+    except ValueError as exc:
+        print(f"[ERROR] {exc}", file=sys.stderr)
+        return 1
     if evidence_root.exists():
         remove_path(evidence_root)
     create_tree(evidence_root)

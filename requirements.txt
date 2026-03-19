@@ -17,6 +17,7 @@ torchaudio==2.1.2
 cellpose==3.1.0
 
 # I/O and NGFF
+h5py==3.11.0
 aicsimageio==4.14.0
 ome-zarr==0.8.3
 zarr==2.15.0

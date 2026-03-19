@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from src.io_ome import load_any_image
-from src.roi_data import RoiRecord, crop_2d_or_yxc, iter_roi_records, load_roi_manifest
+from src.roi_data import RoiRecord, crop_2d_or_yxc, filter_roi_manifest_by_split, iter_roi_records, load_roi_manifest
 from src.run_service import RuntimeOptions, build_runtime, run_array
 from src.validation import (
     build_benchmark_quality_table,
@@ -437,8 +437,14 @@ def run_roi_benchmark_config(
     save_overlays: bool = False,
     runtime_builder: Callable[..., Any] = build_runtime,
     runtime_runner: Callable[..., Any] = run_array,
+    include_splits: list[str] | None = None,
+    exclude_splits: list[str] | None = None,
 ) -> dict[str, Any]:
-    manifest = load_roi_manifest(roi_manifest)
+    manifest = filter_roi_manifest_by_split(
+        load_roi_manifest(roi_manifest),
+        include_splits=include_splits,
+        exclude_splits=exclude_splits,
+    )
     records = iter_roi_records(manifest, manifest_path=roi_manifest)
     output_dir = Path(output_dir)
 
@@ -589,6 +595,32 @@ def default_config_manifest_for_marker(marker: str) -> pd.DataFrame:
     )
 
 
+def config_from_manifest_row(row: dict[str, Any], *, use_gpu: bool = False) -> RoiBenchmarkConfig:
+    return RoiBenchmarkConfig(
+        config_id=str(row["config_id"]),
+        backend=None if pd.isna(row.get("backend")) or not str(row.get("backend")).strip() else str(row.get("backend")),
+        segmentation_preset=(
+            None
+            if pd.isna(row.get("segmentation_preset")) or not str(row.get("segmentation_preset")).strip()
+            else str(row.get("segmentation_preset"))
+        ),
+        diameter=float(row["diameter"]) if pd.notna(row.get("diameter")) else None,
+        min_size=int(row["min_size"]) if pd.notna(row.get("min_size")) else None,
+        max_size=int(row["max_size"]) if pd.notna(row.get("max_size")) else None,
+        apply_clahe=bool(row.get("apply_clahe", False)) if not isinstance(row.get("apply_clahe"), str) else str(row.get("apply_clahe")).strip().lower() in {"1", "true", "yes", "y"},
+        modality=str(row.get("modality") or "flatmount"),
+        modality_channel_index=int(row["modality_channel_index"]) if pd.notna(row.get("modality_channel_index")) else 0,
+        segmenter_config=json.loads(str(row["segmenter_config_json"])) if pd.notna(row.get("segmenter_config_json")) and str(row.get("segmenter_config_json")).strip() else None,
+        object_filters=json.loads(str(row["object_filters_json"])) if pd.notna(row.get("object_filters_json")) and str(row.get("object_filters_json")).strip() else None,
+        use_gpu=bool(use_gpu),
+        notes=str(row.get("notes") or ""),
+    )
+
+
+def configs_from_manifest(config_manifest: pd.DataFrame, *, use_gpu: bool = False) -> list[RoiBenchmarkConfig]:
+    return [config_from_manifest_row(row, use_gpu=use_gpu) for row in config_manifest.to_dict("records")]
+
+
 def run_benchmark_suite(
     *,
     roi_manifest: str | Path,
@@ -598,8 +630,14 @@ def run_benchmark_suite(
     use_gpu: bool = False,
     runtime_builder: Callable[..., Any] = build_runtime,
     runtime_runner: Callable[..., Any] = run_array,
+    include_splits: list[str] | None = None,
+    exclude_splits: list[str] | None = None,
 ) -> dict[str, Any]:
-    manifest = load_roi_manifest(roi_manifest)
+    manifest = filter_roi_manifest_by_split(
+        load_roi_manifest(roi_manifest),
+        include_splits=include_splits,
+        exclude_splits=exclude_splits,
+    )
     output_dir = Path(output_dir)
     results_root = output_dir / "results"
     report_root = output_dir / "report"
@@ -610,26 +648,7 @@ def run_benchmark_suite(
     all_frames: list[pd.DataFrame] = []
     comparison_rows: list[dict[str, Any]] = []
 
-    for row in config_manifest.to_dict("records"):
-        config = RoiBenchmarkConfig(
-            config_id=str(row["config_id"]),
-            backend=None if pd.isna(row.get("backend")) or not str(row.get("backend")).strip() else str(row.get("backend")),
-            segmentation_preset=(
-                None
-                if pd.isna(row.get("segmentation_preset")) or not str(row.get("segmentation_preset")).strip()
-                else str(row.get("segmentation_preset"))
-            ),
-            diameter=float(row["diameter"]) if pd.notna(row.get("diameter")) else None,
-            min_size=int(row["min_size"]) if pd.notna(row.get("min_size")) else None,
-            max_size=int(row["max_size"]) if pd.notna(row.get("max_size")) else None,
-            apply_clahe=bool(row.get("apply_clahe", False)) if not isinstance(row.get("apply_clahe"), str) else str(row.get("apply_clahe")).strip().lower() in {"1", "true", "yes", "y"},
-            modality=str(row.get("modality") or "flatmount"),
-            modality_channel_index=int(row["modality_channel_index"]) if pd.notna(row.get("modality_channel_index")) else 0,
-            segmenter_config=json.loads(str(row["segmenter_config_json"])) if pd.notna(row.get("segmenter_config_json")) and str(row.get("segmenter_config_json")).strip() else None,
-            object_filters=json.loads(str(row["object_filters_json"])) if pd.notna(row.get("object_filters_json")) and str(row.get("object_filters_json")).strip() else None,
-            use_gpu=bool(use_gpu),
-            notes=str(row.get("notes") or ""),
-        )
+    for config in configs_from_manifest(config_manifest, use_gpu=use_gpu):
         run_result = run_roi_benchmark_config(
             roi_manifest=roi_manifest,
             output_dir=results_root / config.config_id,
@@ -637,6 +656,8 @@ def run_benchmark_suite(
             save_overlays=save_overlays,
             runtime_builder=runtime_builder,
             runtime_runner=runtime_runner,
+            include_splits=include_splits,
+            exclude_splits=exclude_splits,
         )
         primary_frames.append(run_result["primary_frame"])
         all_frames.append(run_result["all_frame"])

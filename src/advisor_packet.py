@@ -36,6 +36,8 @@ PYTEST_PATTERNS = [
     re.compile(r"passed with\s+(\d+)\s+tests"),
     re.compile(r"(\d+)\s+tests"),
 ]
+ROOT = Path(__file__).resolve().parents[1]
+PRIVATE_TEST_SUBJECTS_ROOT = ROOT / "test_subjects" / "private"
 
 
 class _SimpleHTMLTableParser(HTMLParser):
@@ -70,6 +72,33 @@ class _SimpleHTMLTableParser(HTMLParser):
             if self._current_table:
                 self.tables.append(self._current_table)
             self._current_table = None
+
+
+def is_private_roi_benchmark_dir(path: str | Path | None) -> bool:
+    if path is None:
+        return False
+    resolved = Path(path).expanduser().resolve()
+    if resolved == PRIVATE_TEST_SUBJECTS_ROOT or PRIVATE_TEST_SUBJECTS_ROOT in resolved.parents:
+        return True
+    parts = [part.lower() for part in resolved.parts]
+    if "test_subjects" in parts:
+        index = parts.index("test_subjects")
+        return "private" in parts[index + 1 :]
+    return False
+
+
+def assert_public_roi_benchmark_export_allowed(
+    roi_benchmark_dir: str | Path | None,
+    *,
+    allow_private_roi_benchmark_export: bool = False,
+) -> None:
+    if roi_benchmark_dir is None:
+        return
+    if is_private_roi_benchmark_dir(roi_benchmark_dir) and not allow_private_roi_benchmark_export:
+        raise ValueError(
+            "Refusing to export a private ROI benchmark directory into the advisor packet without "
+            "--allow-private-roi-benchmark-export."
+        )
 
 
 def file_sha256(path: str | Path) -> str:

@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import tifffile
 
+from scripts.qc_roi_sources import qc_has_blockers
 from src.roi_data import crop_2d_or_yxc, load_roi_manifest, qc_roi_manifest
 
 
@@ -32,6 +33,28 @@ def test_qc_roi_manifest_flags_duplicate_file_hashes(tmp_path: Path):
     qc = qc_roi_manifest(load_roi_manifest(manifest_path), manifest_path=manifest_path)
 
     assert qc["duplicate_image"].all()
+    assert bool(qc["reused_source_image"].all()) is True
+
+
+def test_qc_reused_source_images_are_not_blocking_when_rois_do_not_overlap(tmp_path: Path):
+    image = np.arange(32 * 32, dtype=np.uint16).reshape(32, 32)
+    shared = tmp_path / "shared.tif"
+    tifffile.imwrite(shared, image)
+    manual = tmp_path / "manual.csv"
+    manual.write_text("x_px,y_px\n1,1\n", encoding="utf-8")
+    manifest_path = _write_manifest(
+        tmp_path,
+        [
+            {"roi_id": "R1", "image_path": shared.name, "marker": "RBPMS", "modality": "flatmount", "x0": 0, "y0": 0, "width": 8, "height": 8, "annotator": "A", "manual_points_path": manual.name},
+            {"roi_id": "R2", "image_path": shared.name, "marker": "RBPMS", "modality": "flatmount", "x0": 16, "y0": 16, "width": 8, "height": 8, "annotator": "A", "manual_points_path": manual.name},
+        ],
+    )
+
+    qc = qc_roi_manifest(load_roi_manifest(manifest_path), manifest_path=manifest_path)
+
+    assert qc["reused_source_image"].all()
+    assert not qc["overlaps_with_other_roi"].any()
+    assert qc_has_blockers(qc) is False
 
 
 def test_qc_roi_manifest_flags_duplicate_crops(tmp_path: Path):
@@ -68,6 +91,24 @@ def test_qc_roi_manifest_flags_out_of_bounds_roi(tmp_path: Path):
     qc = qc_roi_manifest(load_roi_manifest(manifest_path), manifest_path=manifest_path)
 
     assert bool(qc.loc[0, "bounds_ok"]) is False
+
+
+def test_qc_roi_manifest_flags_overlapping_rois(tmp_path: Path):
+    tifffile.imwrite(tmp_path / "a.tif", np.zeros((32, 32), dtype=np.uint8))
+    manual = tmp_path / "manual.csv"
+    manual.write_text("x_px,y_px\n1,1\n", encoding="utf-8")
+    manifest_path = _write_manifest(
+        tmp_path,
+        [
+            {"roi_id": "R1", "image_path": "a.tif", "marker": "RBPMS", "modality": "flatmount", "x0": 0, "y0": 0, "width": 16, "height": 16, "annotator": "A", "manual_points_path": manual.name},
+            {"roi_id": "R2", "image_path": "a.tif", "marker": "RBPMS", "modality": "flatmount", "x0": 8, "y0": 8, "width": 16, "height": 16, "annotator": "A", "manual_points_path": manual.name},
+        ],
+    )
+
+    qc = qc_roi_manifest(load_roi_manifest(manifest_path), manifest_path=manifest_path)
+
+    assert qc["overlaps_with_other_roi"].all()
+    assert qc_has_blockers(qc) is True
 
 
 def test_crop_2d_or_yxc_handles_grayscale_and_channels_last():

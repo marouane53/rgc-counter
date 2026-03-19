@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -69,3 +71,20 @@ def test_audit_roi_benchmark_passes_for_valid_outputs(tmp_path: Path):
 
     assert audit["passed"] is True
     assert audit["reason"] == "benchmark_passed"
+
+
+def test_audit_roi_benchmark_cli_supports_flag_and_writes_artifacts(tmp_path: Path):
+    benchmark_dir = _write_benchmark_dir(tmp_path)
+    root = Path(__file__).resolve().parents[1]
+
+    completed = subprocess.run(
+        [sys.executable, "scripts/audit_roi_benchmark.py", "--benchmark-dir", str(benchmark_dir)],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert (benchmark_dir / "report" / "benchmark_audit.json").exists()
+    assert (benchmark_dir / "report" / "benchmark_audit.md").exists()

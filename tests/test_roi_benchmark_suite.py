@@ -134,3 +134,62 @@ def test_suite_runner_handles_json_columns_in_config_manifest(tmp_path: Path):
     comparison = pd.read_csv(output_dir / "results" / "config_comparison.csv")
     assert not comparison.empty
     assert (output_dir / "report" / "benchmark_quality.csv").exists()
+
+
+def test_suite_runner_filters_out_qc_split_rows(tmp_path: Path):
+    image_path = tmp_path / "roi_source.tif"
+    tifffile.imwrite(image_path, np.zeros((32, 32), dtype=np.uint8))
+    rows = []
+    for index in range(22):
+        manual_path = tmp_path / f"manual_{index:03d}.csv"
+        manual_path.write_text("x_px,y_px\n10,10\n20,20\n", encoding="utf-8")
+        rows.append(
+            {
+                "roi_id": f"DEV_{index:03d}",
+                "image_path": str(image_path),
+                "marker": "RBPMS",
+                "modality": "flatmount",
+                "x0": 0,
+                "y0": 0,
+                "width": 32,
+                "height": 32,
+                "annotator": "tester",
+                "manual_points_path": str(manual_path),
+                "split": "dev",
+                "notes": "",
+            }
+        )
+    for index in range(3):
+        rows.append(
+            {
+                "roi_id": f"QC_{index:03d}",
+                "image_path": str(image_path),
+                "marker": "RBPMS",
+                "modality": "flatmount",
+                "x0": 0,
+                "y0": 0,
+                "width": 32,
+                "height": 32,
+                "annotator": "tester",
+                "manual_points_path": "",
+                "split": "qc_or_exclude",
+                "notes": "exclude",
+            }
+        )
+    manifest = tmp_path / "roi_manifest.csv"
+    pd.DataFrame(rows).to_csv(manifest, index=False)
+    config_manifest = _write_config_manifest(tmp_path)
+    output_dir = tmp_path / "suite_output"
+
+    result = run_benchmark_suite(
+        roi_manifest=manifest,
+        config_manifest=config_manifest,
+        output_dir=output_dir,
+        runtime_builder=_fake_runtime_builder,
+        runtime_runner=_fake_runtime_runner,
+        include_splits=["dev"],
+    )
+
+    comparison = pd.read_csv(output_dir / "results" / "config_comparison.csv")
+    assert result["exit_code"] == 0
+    assert set(comparison["n_rois"]) == {22}

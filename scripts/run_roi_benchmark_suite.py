@@ -15,7 +15,7 @@ from src.roi_benchmark import (
     default_config_manifest_for_marker,
     run_benchmark_suite as _run_benchmark_suite,
 )
-from src.roi_data import load_roi_manifest
+from src.roi_data import filter_roi_manifest_by_split, load_roi_manifest
 
 
 def _load_config_manifest(path: str | Path | None, *, marker: str) -> pd.DataFrame:
@@ -33,8 +33,14 @@ def run_benchmark_suite(
     runtime_builder=None,
     runtime_runner=None,
     use_gpu: bool = False,
+    include_splits: list[str] | None = None,
+    exclude_splits: list[str] | None = None,
 ) -> dict:
-    manifest = load_roi_manifest(roi_manifest)
+    manifest = filter_roi_manifest_by_split(
+        load_roi_manifest(roi_manifest),
+        include_splits=include_splits,
+        exclude_splits=exclude_splits,
+    )
     marker = str(manifest.iloc[0]["marker"]).strip() if not manifest.empty else "RBPMS"
     config_frame = _load_config_manifest(config_manifest, marker=marker)
 
@@ -44,6 +50,8 @@ def run_benchmark_suite(
         "output_dir": output_dir,
         "save_overlays": save_overlays,
         "use_gpu": use_gpu,
+        "include_splits": include_splits,
+        "exclude_splits": exclude_splits,
     }
     if runtime_builder is not None:
         kwargs["runtime_builder"] = runtime_builder
@@ -62,10 +70,12 @@ def run_benchmark_suite(
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the real ROI benchmark comparison suite.")
-    parser.add_argument("--roi_manifest", required=True, help="CSV manifest for manually annotated ROIs")
+    parser.add_argument("--roi_manifest", "--manifest", dest="roi_manifest", required=True, help="CSV manifest for manually annotated ROIs")
     parser.add_argument("--config_manifest", default=None, help="Optional config manifest CSV")
     parser.add_argument("--output_dir", required=True, help="Output directory for benchmark-suite results")
     parser.add_argument("--save_overlays", action="store_true")
+    parser.add_argument("--include-splits", nargs="*", default=None)
+    parser.add_argument("--exclude-splits", nargs="*", default=None)
     gpu_group = parser.add_mutually_exclusive_group()
     gpu_group.add_argument("--use_gpu", action="store_true")
     gpu_group.add_argument("--no_gpu", action="store_true")
@@ -80,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=args.output_dir,
         save_overlays=bool(args.save_overlays),
         use_gpu=bool(args.use_gpu and not args.no_gpu),
+        include_splits=args.include_splits,
+        exclude_splits=args.exclude_splits,
     )
     return int(result["exit_code"])
 
