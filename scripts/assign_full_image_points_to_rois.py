@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -13,10 +14,19 @@ if str(ROOT) not in sys.path:
 from src.roi_data import iter_roi_records, load_roi_manifest
 
 
+def _load_points_sidecar(path: Path) -> dict:
+    candidates = [path.with_suffix(".json"), Path(str(path) + ".json")]
+    for candidate in candidates:
+        if candidate.exists():
+            return json.loads(candidate.read_text(encoding="utf-8"))
+    return {}
+
+
 def assign_points_to_rois(*, roi_manifest: Path, full_image_points_csv: Path, image_path: Path | None = None) -> pd.DataFrame:
     manifest = load_roi_manifest(roi_manifest)
     records = iter_roi_records(manifest, manifest_path=roi_manifest)
     points = pd.read_csv(full_image_points_csv)
+    sidecar = _load_points_sidecar(full_image_points_csv)
     required = {"x_px", "y_px"}
     missing = sorted(required - set(points.columns))
     if missing:
@@ -48,11 +58,27 @@ def assign_points_to_rois(*, roi_manifest: Path, full_image_points_csv: Path, im
             )
         record.manual_points_path.parent.mkdir(parents=True, exist_ok=True)
         local.to_csv(record.manual_points_path, index=False)
+        meta_path = record.manual_points_path.with_suffix(".meta.json")
+        meta_payload = {
+            "roi_id": record.roi_id,
+            "marker": record.marker,
+            "truth_marker": sidecar.get("truth_marker"),
+            "truth_source_channel": sidecar.get("truth_source_channel", sidecar.get("source_channel_index")),
+            "truth_derivation": sidecar.get("truth_derivation", "full_image_points_subset"),
+            "truth_source_path": sidecar.get("truth_source_path", str(full_image_points_csv.resolve())),
+            "source_points_csv": str(full_image_points_csv.resolve()),
+            "source_image_path": str(record.image_path),
+            "roi_xywh": [int(record.x0), int(record.y0), int(record.width), int(record.height)],
+            "n_points": int(len(local)),
+            "tool": "scripts/assign_full_image_points_to_rois.py",
+        }
+        meta_path.write_text(json.dumps(meta_payload, indent=2) + "\n", encoding="utf-8")
         rows.append(
             {
                 "roi_id": record.roi_id,
                 "image_path": str(record.image_path),
                 "manual_points_path": str(record.manual_points_path),
+                "manual_points_meta_path": str(meta_path),
                 "n_points_written": int(len(local)),
             }
         )

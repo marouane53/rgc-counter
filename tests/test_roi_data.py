@@ -2,12 +2,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
 import numpy as np
 import pandas as pd
 import tifffile
 
 from scripts.qc_roi_sources import qc_has_blockers
-from src.roi_data import crop_2d_or_yxc, load_roi_manifest, qc_roi_manifest
+from src.roi_data import (
+    TRUTH_PROVENANCE_STATUS_INVALID,
+    TRUTH_PROVENANCE_STATUS_UNKNOWN,
+    crop_2d_or_yxc,
+    iter_roi_records,
+    load_roi_manifest,
+    qc_roi_manifest,
+)
 
 
 def _write_manifest(root: Path, rows: list[dict[str, object]]) -> Path:
@@ -120,3 +128,73 @@ def test_crop_2d_or_yxc_handles_grayscale_and_channels_last():
 
     assert gray_crop.shape == (5, 4)
     assert yxc_crop.shape == (5, 4, 2)
+
+
+def test_iter_roi_records_marks_cross_channel_truth_invalid(tmp_path: Path):
+    image_path = tmp_path / "tile.tif"
+    tifffile.imwrite(image_path, np.zeros((32, 32), dtype=np.uint8))
+    image_path.with_suffix(".json").write_text(json.dumps({"channel_index": 1}), encoding="utf-8")
+    manual = tmp_path / "manual.csv"
+    manual.write_text("x_px,y_px\n1,1\n", encoding="utf-8")
+    manual.with_suffix(".meta.json").write_text(
+        json.dumps({"truth_marker": "RBPMS", "truth_source_channel": 0, "truth_derivation": "embedded_imaris_scene_spots"}),
+        encoding="utf-8",
+    )
+    manifest_path = _write_manifest(
+        tmp_path,
+        [
+            {
+                "roi_id": "R1",
+                "image_path": image_path.name,
+                "marker": "RBPMS",
+                "modality": "flatmount",
+                "x0": 0,
+                "y0": 0,
+                "width": 16,
+                "height": 16,
+                "annotator": "A",
+                "manual_points_path": manual.name,
+                "split": "dev",
+                "notes": "",
+            }
+        ],
+    )
+
+    records = iter_roi_records(load_roi_manifest(manifest_path), manifest_path=manifest_path)
+
+    assert len(records) == 1
+    assert records[0].image_source_channel == 1
+    assert records[0].truth_source_channel == 0
+    assert records[0].truth_provenance_valid is False
+    assert records[0].truth_provenance_status == TRUTH_PROVENANCE_STATUS_INVALID
+
+
+def test_iter_roi_records_leaves_legacy_truth_unknown_but_valid(tmp_path: Path):
+    image_path = tmp_path / "tile.tif"
+    tifffile.imwrite(image_path, np.zeros((32, 32), dtype=np.uint8))
+    manual = tmp_path / "manual.csv"
+    manual.write_text("x_px,y_px\n1,1\n", encoding="utf-8")
+    manifest_path = _write_manifest(
+        tmp_path,
+        [
+            {
+                "roi_id": "R1",
+                "image_path": image_path.name,
+                "marker": "RBPMS",
+                "modality": "flatmount",
+                "x0": 0,
+                "y0": 0,
+                "width": 16,
+                "height": 16,
+                "annotator": "A",
+                "manual_points_path": manual.name,
+                "split": "dev",
+                "notes": "",
+            }
+        ],
+    )
+
+    records = iter_roi_records(load_roi_manifest(manifest_path), manifest_path=manifest_path)
+
+    assert records[0].truth_provenance_valid is True
+    assert records[0].truth_provenance_status == TRUTH_PROVENANCE_STATUS_UNKNOWN

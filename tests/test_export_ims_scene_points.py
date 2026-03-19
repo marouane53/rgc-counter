@@ -52,6 +52,8 @@ def test_export_scene_points_converts_to_pixel_coordinates(tmp_path: Path):
     frame, summary = export_scene_points(ims_path=ims_path, metadata_json=metadata_json)
 
     assert summary["source_channel_index"] == 1
+    assert summary["truth_source_channel"] == 1
+    assert summary["truth_derivation"] == "embedded_imaris_scene_spots"
     assert len(frame) == 2
     assert frame.loc[0, "x_px"] == 1.0
     assert frame.loc[0, "y_px"] == 2.0

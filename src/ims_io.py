@@ -175,6 +175,25 @@ def _channel_dataset_group(
     return value if isinstance(value, h5py.Group) else None
 
 
+def _channel_dataset(
+    h5: h5py.File,
+    channel_index: int,
+    *,
+    resolution_level: int = 0,
+    timepoint: int = 0,
+) -> h5py.Dataset | None:
+    dataset_group = _channel_dataset_group(
+        h5,
+        channel_index=channel_index,
+        resolution_level=resolution_level,
+        timepoint=timepoint,
+    )
+    if dataset_group is None:
+        return None
+    data = dataset_group.get("Data")
+    return data if isinstance(data, h5py.Dataset) else None
+
+
 def _dataset_details(dataset_group: h5py.Group | None) -> dict[str, Any]:
     if dataset_group is None:
         return {}
@@ -452,6 +471,48 @@ def extract_scene_spot_points(h5: h5py.File) -> dict[str, Any] | None:
         "xyzr_um": xyzr,
         "creation_parameters": creation_parameters,
     }
+
+
+def stream_channel_crop(
+    path: str | Path,
+    *,
+    channel_index: int,
+    x0: int,
+    y0: int,
+    width: int,
+    height: int,
+    resolution_level: int = 0,
+    timepoint: int = 0,
+    z_start: int | None = None,
+    z_end: int | None = None,
+) -> np.ndarray:
+    resolved = Path(path)
+    with h5py.File(resolved, "r") as h5:
+        dataset = _channel_dataset(
+            h5,
+            channel_index=int(channel_index),
+            resolution_level=int(resolution_level),
+            timepoint=int(timepoint),
+        )
+        if dataset is None:
+            raise KeyError(
+                f"Missing dataset for channel {int(channel_index)} at resolution level {int(resolution_level)} timepoint {int(timepoint)}"
+            )
+        if dataset.ndim == 2:
+            return np.asarray(dataset[int(y0) : int(y0 + height), int(x0) : int(x0 + width)])
+        if dataset.ndim != 3:
+            raise ValueError(f"Expected a 2D or 3D channel dataset, got shape={tuple(int(v) for v in dataset.shape)}")
+        z0 = 0 if z_start is None else max(int(z_start), 0)
+        z1 = int(dataset.shape[0]) if z_end is None else min(int(z_end), int(dataset.shape[0]))
+        if z0 >= z1:
+            raise ValueError(f"Invalid z range [{z0}, {z1}) for dataset shape {tuple(int(v) for v in dataset.shape)}")
+        if int(x0) < 0 or int(y0) < 0 or int(width) <= 0 or int(height) <= 0:
+            raise ValueError("Crop bounds must be non-negative with positive width and height.")
+        x1 = int(x0) + int(width)
+        y1 = int(y0) + int(height)
+        if x1 > int(dataset.shape[2]) or y1 > int(dataset.shape[1]):
+            raise ValueError(f"Crop bounds {(x0, y0, width, height)} exceed dataset shape {tuple(int(v) for v in dataset.shape)}")
+        return np.asarray(dataset[z0:z1, int(y0) : y1, int(x0) : x1])
 
 
 def file_sha256(path: str | Path, chunk_size: int = 1024 * 1024) -> str:

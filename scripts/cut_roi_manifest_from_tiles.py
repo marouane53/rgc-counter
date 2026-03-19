@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from collections import Counter
@@ -15,6 +16,10 @@ if str(ROOT) not in sys.path:
 from src.io_ome import load_any_image
 from src.roi_data import crop_2d_or_yxc
 from src.roi_selection import DEFAULT_SPLIT_TARGETS, parse_split_targets, remaining_split_targets, roi_row, select_fixed_rois_napari
+
+
+def _log(message: str) -> None:
+    print(message, file=sys.stderr, flush=True)
 
 
 def _markdown_table(frame: pd.DataFrame) -> str:
@@ -39,6 +44,13 @@ def _projected_images(projected_dir: Path) -> list[Path]:
 
 def _roi_id(image_path: Path, split: str, index: int) -> str:
     return f"{image_path.stem}__{split}_{int(index):03d}"
+
+
+def _image_sidecar_payload(image_path: Path) -> dict:
+    for candidate in (image_path.with_suffix(".json"), Path(str(image_path) + ".json")):
+        if candidate.exists():
+            return json.loads(candidate.read_text(encoding="utf-8"))
+    return {}
 
 
 def _write_preview(image, *, x0: int, y0: int, width: int, height: int, destination: Path) -> None:
@@ -76,20 +88,35 @@ def main(argv: list[str] | None = None) -> int:
 
     rows: list[dict[str, object]] = []
     split_counts: Counter[str] = Counter()
+    _log(
+        f"[cut_roi_manifest_from_tiles] Starting ROI selection across {len(projected_paths)} image(s); "
+        f"target={int(args.target_count)} roi_size={int(args.roi_size)} split_targets={dict(split_targets)}"
+    )
 
     for pass_index in range(int(args.search_passes)):
         if sum(split_counts.values()) >= int(args.target_count):
             break
+        _log(
+            f"[cut_roi_manifest_from_tiles] Pass {int(pass_index) + 1}/{int(args.search_passes)} "
+            f"current_counts={dict(split_counts)}"
+        )
         for image_path in projected_paths:
             remaining = remaining_split_targets(split_counts, split_targets)
             if sum(remaining.values()) <= 0:
                 break
+            _log(
+                f"[cut_roi_manifest_from_tiles] Opening {image_path.name} with remaining_targets={dict(remaining)}"
+            )
             image, _ = load_any_image(str(image_path))
+            sidecar = _image_sidecar_payload(image_path)
             selections = select_fixed_rois_napari(
                 image,
                 roi_size=int(args.roi_size),
                 split_targets=remaining,
                 title=f"{image_path.name} | pass {int(pass_index) + 1}",
+            )
+            _log(
+                f"[cut_roi_manifest_from_tiles] {image_path.name}: captured {len(selections)} selection(s)"
             )
             for selection in selections:
                 split = str(selection["split"])
@@ -106,6 +133,8 @@ def main(argv: list[str] | None = None) -> int:
                     width=int(selection["width"]),
                     height=int(selection["height"]),
                     annotator=args.annotator,
+                    image_marker="RBPMS",
+                    image_source_channel=int(sidecar.get("channel_index")) if sidecar.get("channel_index") is not None else None,
                 )
                 rows.append(row)
                 if args.export_previews:
@@ -131,6 +160,10 @@ def main(argv: list[str] | None = None) -> int:
         )
         + "\n",
         encoding="utf-8",
+    )
+    _log(
+        f"[cut_roi_manifest_from_tiles] Wrote {len(frame)} ROI row(s) to {output_manifest} "
+        f"with final_counts={dict(split_counts)}"
     )
     return 0
 

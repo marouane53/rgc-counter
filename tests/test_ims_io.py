@@ -6,7 +6,14 @@ from pathlib import Path
 import h5py
 import numpy as np
 
-from src.ims_io import compute_voxel_sizes_um, extract_scene_spot_points, extract_standard_ims_metadata, find_candidate_rbpms_channels, inspect_ims_file
+from src.ims_io import (
+    compute_voxel_sizes_um,
+    extract_scene_spot_points,
+    extract_standard_ims_metadata,
+    find_candidate_rbpms_channels,
+    inspect_ims_file,
+    stream_channel_crop,
+)
 
 
 def _write_ims_fixture(path: Path) -> Path:
@@ -181,3 +188,13 @@ def test_extract_scene_spot_points_prefers_structured_spot_dataset(tmp_path: Pat
     assert payload["point_ids"].tolist() == [1, 2]
     assert payload["xyzr_um"].shape == (2, 4)
     assert 'mSourceChannelIndex="1"' in payload["creation_parameters"]
+
+
+def test_stream_channel_crop_reads_raw_zyx_subvolume(tmp_path: Path):
+    path = _write_ims_fixture(tmp_path / "sample.ims")
+
+    crop = stream_channel_crop(path, channel_index=1, x0=1, y0=1, width=3, height=2, z_start=1, z_end=3)
+
+    assert crop.shape == (2, 2, 3)
+    assert crop[0, 0, 0] == 126
+    assert crop[-1, -1, -1] == 153

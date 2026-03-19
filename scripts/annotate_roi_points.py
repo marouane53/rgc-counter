@@ -47,6 +47,7 @@ def build_points_metadata(
     modality: str,
     roi_xywh: tuple[int, int, int, int],
     n_points: int,
+    image_source_channel: int | None = None,
 ) -> dict[str, object]:
     return {
         "roi_id": roi_id,
@@ -56,6 +57,10 @@ def build_points_metadata(
         "modality": modality,
         "roi_xywh": [int(v) for v in roi_xywh],
         "n_points": int(n_points),
+        "truth_marker": marker,
+        "truth_source_channel": int(image_source_channel) if image_source_channel is not None else None,
+        "truth_derivation": "manual_point_truth",
+        "truth_source_path": str(image_path),
         "saved_at": datetime.now(timezone.utc).isoformat(),
         "tool": "scripts/annotate_roi_points.py",
     }
@@ -172,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
                 modality=record.modality,
                 roi_xywh=(record.x0, record.y0, record.width, record.height),
                 n_points=len(points),
+                image_source_channel=record.image_source_channel,
             ),
         )
     return 0

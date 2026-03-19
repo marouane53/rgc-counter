@@ -187,3 +187,31 @@ def test_manual_benchmark_rejects_mixed_marker_manifest():
 
     with pytest.raises(ValueError, match="mixes markers"):
         validate_roi_benchmark_manifest(manifest)
+
+
+def test_validate_roi_benchmark_manifest_preserves_optional_provenance_columns():
+    manifest = pd.DataFrame(
+        [
+            {
+                "roi_id": "R1",
+                "image_path": "a.tif",
+                "marker": "RBPMS",
+                "modality": "flatmount",
+                "x0": 0,
+                "y0": 0,
+                "width": 32,
+                "height": 32,
+                "annotator": "A",
+                "manual_points_path": "a.csv",
+                "split": "dev",
+                "notes": "",
+                "image_source_channel": 1,
+                "truth_source_channel": 1,
+            }
+        ]
+    )
+
+    validated = validate_roi_benchmark_manifest(manifest)
+
+    assert "image_source_channel" in validated.columns
+    assert "truth_source_channel" in validated.columns

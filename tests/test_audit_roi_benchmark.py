@@ -9,7 +9,15 @@ import pandas as pd
 from scripts.audit_roi_benchmark import audit_roi_benchmark_dir
 
 
-def _write_benchmark_dir(root: Path, *, n_rois: int = 24, matched_modality: bool = True, pass_threshold: bool = True) -> Path:
+def _write_benchmark_dir(
+    root: Path,
+    *,
+    n_rois: int = 24,
+    matched_modality: bool = True,
+    pass_threshold: bool = True,
+    truth_provenance_valid: bool = True,
+    truth_provenance_status: str = "matched",
+) -> Path:
     benchmark_dir = root / "benchmark"
     (benchmark_dir / "results").mkdir(parents=True)
     (benchmark_dir / "report").mkdir(parents=True)
@@ -29,6 +37,8 @@ def _write_benchmark_dir(root: Path, *, n_rois: int = 24, matched_modality: bool
                 "f1": 0.8,
                 "mae": 1.0,
                 "pass_threshold": pass_threshold,
+                "truth_provenance_valid": truth_provenance_valid,
+                "truth_provenance_status": truth_provenance_status,
             }
         ]
     ).to_csv(benchmark_dir / "report" / "benchmark_quality.csv", index=False)
@@ -66,6 +76,24 @@ def test_audit_roi_benchmark_fails_when_threshold_not_passed(tmp_path: Path):
 
 def test_audit_roi_benchmark_passes_for_valid_outputs(tmp_path: Path):
     benchmark_dir = _write_benchmark_dir(tmp_path)
+
+    audit = audit_roi_benchmark_dir(benchmark_dir)
+
+    assert audit["passed"] is True
+    assert audit["reason"] == "benchmark_passed"
+
+
+def test_audit_roi_benchmark_fails_for_invalid_truth_provenance(tmp_path: Path):
+    benchmark_dir = _write_benchmark_dir(tmp_path, truth_provenance_valid=False, truth_provenance_status="invalid")
+
+    audit = audit_roi_benchmark_dir(benchmark_dir)
+
+    assert audit["passed"] is False
+    assert audit["reason"] == "invalid_truth_provenance"
+
+
+def test_audit_roi_benchmark_allows_unknown_legacy_truth(tmp_path: Path):
+    benchmark_dir = _write_benchmark_dir(tmp_path, truth_provenance_valid=True, truth_provenance_status="unknown")
 
     audit = audit_roi_benchmark_dir(benchmark_dir)
 

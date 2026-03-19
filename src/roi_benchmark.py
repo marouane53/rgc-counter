@@ -11,7 +11,16 @@ import numpy as np
 import pandas as pd
 
 from src.io_ome import load_any_image
-from src.roi_data import RoiRecord, crop_2d_or_yxc, filter_roi_manifest_by_split, iter_roi_records, load_roi_manifest
+from src.roi_data import (
+    TRUTH_PROVENANCE_STATUS_INVALID,
+    TRUTH_PROVENANCE_STATUS_MATCHED,
+    TRUTH_PROVENANCE_STATUS_UNKNOWN,
+    RoiRecord,
+    crop_2d_or_yxc,
+    filter_roi_manifest_by_split,
+    iter_roi_records,
+    load_roi_manifest,
+)
 from src.run_service import RuntimeOptions, build_runtime, run_array
 from src.validation import (
     build_benchmark_quality_table,
@@ -70,6 +79,29 @@ def _json_ready(value: Any) -> Any:
     if isinstance(value, Path):
         return str(value)
     return value
+
+
+def summarize_truth_provenance(records: list[RoiRecord]) -> dict[str, Any]:
+    total = int(len(records))
+    invalid = int(sum(1 for record in records if not record.truth_provenance_valid))
+    unknown = int(sum(1 for record in records if record.truth_provenance_status == TRUTH_PROVENANCE_STATUS_UNKNOWN))
+    matched = int(sum(1 for record in records if record.truth_provenance_status == TRUTH_PROVENANCE_STATUS_MATCHED))
+    if invalid > 0:
+        status = TRUTH_PROVENANCE_STATUS_INVALID
+    elif total > 0 and matched == total:
+        status = TRUTH_PROVENANCE_STATUS_MATCHED
+    else:
+        status = TRUTH_PROVENANCE_STATUS_UNKNOWN
+    issues = sorted({issue for record in records for issue in record.truth_provenance_issues if str(issue).strip()})
+    return {
+        "truth_provenance_status": status,
+        "truth_provenance_valid": bool(invalid == 0),
+        "truth_provenance_invalid_rois": invalid,
+        "truth_provenance_unknown_rois": unknown,
+        "truth_provenance_matched_rois": matched,
+        "truth_provenance_total_rois": total,
+        "truth_provenance_issues": issues,
+    }
 
 
 def predicted_points_from_context(ctx: Any) -> np.ndarray:
@@ -135,6 +167,15 @@ def run_single_roi_case(
                 "roi_id": record.roi_id,
                 "marker": record.marker,
                 "modality": record.modality,
+                "image_marker": record.image_marker,
+                "image_source_channel": record.image_source_channel,
+                "truth_marker": record.truth_marker,
+                "truth_source_channel": record.truth_source_channel,
+                "truth_derivation": record.truth_derivation,
+                "truth_source_path": str(record.truth_source_path) if record.truth_source_path is not None else None,
+                "truth_provenance_status": record.truth_provenance_status,
+                "truth_provenance_valid": bool(record.truth_provenance_valid),
+                "truth_provenance_issues": "; ".join(record.truth_provenance_issues),
                 "image_path": str(record.image_path),
                 "manual_points_path": str(record.manual_points_path) if record.manual_points_path is not None else None,
                 "backend": runtime.backend,
@@ -223,6 +264,26 @@ def summarize_config_results(results_frame: pd.DataFrame) -> pd.DataFrame:
             "count_bias_mean_8px": float(primary["count_bias"].mean()),
             "runtime_seconds_mean": float(primary["runtime_seconds"].mean()) if "runtime_seconds" in primary else float("nan"),
             "median_manual_count": float(primary["manual_count"].median()) if "manual_count" in primary else float("nan"),
+            "truth_provenance_status": (
+                TRUTH_PROVENANCE_STATUS_INVALID
+                if (primary.get("truth_provenance_valid", pd.Series(dtype=bool)) == False).any()  # noqa: E712
+                else (
+                    TRUTH_PROVENANCE_STATUS_MATCHED
+                    if "truth_provenance_status" in primary
+                    and not primary.empty
+                    and set(primary["truth_provenance_status"].dropna().astype(str)) == {TRUTH_PROVENANCE_STATUS_MATCHED}
+                    else TRUTH_PROVENANCE_STATUS_UNKNOWN
+                )
+            ),
+            "truth_provenance_valid": bool(primary.get("truth_provenance_valid", pd.Series(dtype=bool)).fillna(True).all())
+            if "truth_provenance_valid" in primary
+            else True,
+            "truth_provenance_invalid_rois": int((~primary.get("truth_provenance_valid", pd.Series(True, index=primary.index))).sum())
+            if "truth_provenance_valid" in primary
+            else 0,
+            "truth_provenance_unknown_rois": int((primary.get("truth_provenance_status", pd.Series(dtype=str)) == TRUTH_PROVENANCE_STATUS_UNKNOWN).sum())
+            if "truth_provenance_status" in primary
+            else int(primary["roi_id"].nunique()) if "roi_id" in primary else int(len(primary)),
         }
         for tolerance_px in SENSITIVITY_TOLERANCES_PX:
             tolerance_frame = frame.loc[np.isclose(frame["match_tolerance_px"].astype(float), float(tolerance_px))].copy()
@@ -278,6 +339,25 @@ def build_roi_benchmark_report(
         return "\n".join(lines)
 
     winner = config_summary.iloc[0]
+    lines.extend(
+        [
+            "## Truth Provenance",
+            "",
+            f"- Status: `{winner.get('truth_provenance_status', TRUTH_PROVENANCE_STATUS_UNKNOWN)}`",
+            f"- Valid: `{bool(winner.get('truth_provenance_valid', True))}`",
+            f"- Invalid ROIs: `{int(winner.get('truth_provenance_invalid_rois', 0) or 0)}`",
+            f"- Unknown ROIs: `{int(winner.get('truth_provenance_unknown_rois', 0) or 0)}`",
+            "",
+        ]
+    )
+    if not bool(winner.get("truth_provenance_valid", True)):
+        lines.extend(
+            [
+                "**Invalid truth provenance:** this benchmark includes explicit cross-channel or cross-marker truth metadata conflicts. "
+                "Treat the numeric results as invalid, not merely low quality.",
+                "",
+            ]
+        )
     lines.extend(
         [
             "## Winning Config",
@@ -345,6 +425,31 @@ def build_roi_benchmark_suite_report(
         "",
     ]
     if best_payload:
+        lines.extend(
+            [
+                "## Truth Provenance",
+                "",
+                f"- Status: `{best_payload.get('truth_provenance_status', TRUTH_PROVENANCE_STATUS_UNKNOWN)}`",
+                f"- Valid: `{bool(best_payload.get('truth_provenance_valid', True))}`",
+                f"- Invalid ROIs: `{int(best_payload.get('truth_provenance_invalid_rois', 0) or 0)}`",
+                f"- Unknown ROIs: `{int(best_payload.get('truth_provenance_unknown_rois', 0) or 0)}`",
+                "",
+            ]
+        )
+        if not bool(best_payload.get("truth_provenance_valid", True)):
+            lines.extend(
+                [
+                    "## Verdict",
+                    "",
+                    (
+                        "The benchmark outputs are invalid because explicit truth provenance conflicts were detected "
+                        "(for example, cross-channel or cross-marker truth)."
+                    ),
+                    "",
+                ]
+            )
+            lines.extend(["## Config Comparison", "", markdown_table(comparison_frame), "", "## Benchmark Quality Table", "", markdown_table(quality_frame), ""])
+            return "\n".join(lines)
         if bool(best_payload.get("pass_threshold")) and bool(best_payload.get("beats_baseline")):
             lines.extend(
                 [
@@ -447,6 +552,7 @@ def run_roi_benchmark_config(
     )
     records = iter_roi_records(manifest, manifest_path=roi_manifest)
     output_dir = Path(output_dir)
+    provenance_summary = summarize_truth_provenance(records)
 
     primary_rows: list[dict[str, Any]] = []
     all_rows: list[dict[str, Any]] = []
@@ -491,6 +597,10 @@ def run_roi_benchmark_config(
             f1=float(winner["f1_mean_8px"]),
             mae=float(winner["count_mae_mean_8px"]),
             pass_threshold=bool(winner["pass_threshold"]),
+            truth_provenance_valid=bool(provenance_summary["truth_provenance_valid"]),
+            truth_provenance_status=provenance_summary["truth_provenance_status"],
+            truth_provenance_invalid_rois=int(provenance_summary["truth_provenance_invalid_rois"]),
+            truth_provenance_unknown_rois=int(provenance_summary["truth_provenance_unknown_rois"]),
         )
 
     paths = _write_config_outputs(
@@ -638,6 +748,13 @@ def run_benchmark_suite(
         include_splits=include_splits,
         exclude_splits=exclude_splits,
     )
+    records = iter_roi_records(
+        manifest,
+        manifest_path=roi_manifest,
+        include_splits=include_splits,
+        exclude_splits=exclude_splits,
+    )
+    provenance_summary = summarize_truth_provenance(records)
     output_dir = Path(output_dir)
     results_root = output_dir / "results"
     report_root = output_dir / "report"
@@ -700,6 +817,10 @@ def run_benchmark_suite(
             f1=float(best_payload["f1_mean_8px"]),
             mae=float(best_payload["count_mae_mean_8px"]),
             pass_threshold=bool(best_payload["pass_threshold"]),
+            truth_provenance_valid=bool(provenance_summary["truth_provenance_valid"]),
+            truth_provenance_status=provenance_summary["truth_provenance_status"],
+            truth_provenance_invalid_rois=int(provenance_summary["truth_provenance_invalid_rois"]),
+            truth_provenance_unknown_rois=int(provenance_summary["truth_provenance_unknown_rois"]),
         )
 
     all_primary.to_csv(results_root / "per_roi_metrics.csv", index=False)

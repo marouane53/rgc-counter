@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -158,7 +159,8 @@ def validate_roi_benchmark_manifest(manifest_df: pd.DataFrame) -> pd.DataFrame:
     missing = sorted(set(required[:10]) - set(manifest_df.columns))
     if missing:
         raise ValueError(f"ROI benchmark manifest is missing required columns: {missing}")
-    frame = frame[required].copy()
+    ordered_columns = required + [column for column in frame.columns if column not in required]
+    frame = frame[ordered_columns].copy()
     markers = [str(value).strip() for value in frame["marker"].dropna().tolist() if str(value).strip()]
     if len(set(markers)) > 1:
         raise ValueError("ROI benchmark manifest mixes markers. Use one matched marker family per run.")
@@ -218,21 +220,20 @@ def build_benchmark_quality_table(
     f1: float | None = None,
     mae: float | None = None,
     pass_threshold: bool | None = None,
+    **extra: Any,
 ) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "benchmark_kind": benchmark_kind,
-                "matched_modality": bool(matched_modality),
-                "n_rois": int(n_rois),
-                "precision": precision,
-                "recall": recall,
-                "f1": f1,
-                "mae": mae,
-                "pass_threshold": pass_threshold,
-            }
-        ]
-    )
+    row: dict[str, Any] = {
+        "benchmark_kind": benchmark_kind,
+        "matched_modality": bool(matched_modality),
+        "n_rois": int(n_rois),
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "mae": mae,
+        "pass_threshold": pass_threshold,
+    }
+    row.update(extra)
+    return pd.DataFrame([row])
 
 
 def build_validation_table(sample_table: pd.DataFrame) -> pd.DataFrame:

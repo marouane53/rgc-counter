@@ -132,6 +132,8 @@ def roi_row(
     annotator: str,
     marker: str = "RBPMS",
     modality: str = "flatmount",
+    image_marker: str | None = None,
+    image_source_channel: int | None = None,
 ) -> dict[str, Any]:
     manual_points_path = ""
     notes = ""
@@ -152,4 +154,10 @@ def roi_row(
         "manual_points_path": manual_points_path,
         "split": split,
         "notes": notes,
+        "image_marker": image_marker or marker,
+        "image_source_channel": image_source_channel,
+        "truth_marker": "",
+        "truth_source_channel": "",
+        "truth_derivation": "",
+        "truth_source_path": "",
     }

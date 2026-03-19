@@ -28,14 +28,28 @@ def audit_roi_benchmark_dir(benchmark_dir: str | Path) -> dict[str, object]:
     n_rois = int(row.get("n_rois", 0))
     matched_modality = bool(row.get("matched_modality", False))
     pass_threshold = bool(row.get("pass_threshold", False))
+    truth_provenance_valid = bool(row.get("truth_provenance_valid", True))
+    truth_provenance_status = str(row.get("truth_provenance_status", "unknown")).strip() or "unknown"
 
     if n_rois < 20:
         return {"passed": False, "reason": "too_few_rois", "n_rois": n_rois}
+    if not truth_provenance_valid or truth_provenance_status == "invalid":
+        return {
+            "passed": False,
+            "reason": "invalid_truth_provenance",
+            "n_rois": n_rois,
+            "truth_provenance_status": truth_provenance_status,
+        }
     if not matched_modality:
         return {"passed": False, "reason": "unmatched_modality"}
     if not pass_threshold:
         return {"passed": False, "reason": "benchmark_failed_threshold"}
-    return {"passed": True, "reason": "benchmark_passed", "n_rois": n_rois}
+    return {
+        "passed": True,
+        "reason": "benchmark_passed",
+        "n_rois": n_rois,
+        "truth_provenance_status": truth_provenance_status,
+    }
 
 
 def write_audit_artifacts(benchmark_dir: str | Path, audit: dict[str, object]) -> dict[str, Path]:
@@ -49,7 +63,8 @@ def write_audit_artifacts(benchmark_dir: str | Path, audit: dict[str, object]) -
         "# ROI Benchmark Audit\n\n"
         f"- Passed: `{bool(audit.get('passed'))}`\n"
         f"- Reason: `{audit.get('reason')}`\n"
-        f"- ROIs: `{audit.get('n_rois', 'n/a')}`\n",
+        f"- ROIs: `{audit.get('n_rois', 'n/a')}`\n"
+        f"- Truth provenance: `{audit.get('truth_provenance_status', 'unknown')}`\n",
         encoding="utf-8",
     )
     return {"json_path": json_path, "markdown_path": markdown_path}
